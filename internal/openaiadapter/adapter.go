@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +21,8 @@ import (
 )
 
 const graphToolName = "inspect_typescript_graph"
+
+var gitSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 type Config struct {
 	BaseURL   string
@@ -58,14 +62,29 @@ func ConfigFromEnv() Config {
 }
 
 func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOutput, error) {
+	state := domain.AgentOutput{
+		Runtime: domain.AgentRuntime{
+			Provider:       providerName(cfg.BaseURL),
+			RequestedModel: cfg.Model,
+			Adapter:        "openai-compatible",
+			Endpoint:       cfg.BaseURL,
+			MaxTurns:       cfg.MaxTurns,
+		},
+	}
+	fail := func(err error) (domain.AgentOutput, error) {
+		state.Metrics.Partial = true
+		state.Error = err.Error()
+		return state, err
+	}
+
 	if req.Strategy != "baseline" && req.Strategy != "graph" {
-		return domain.AgentOutput{}, fmt.Errorf("unsupported strategy %q", req.Strategy)
+		return fail(fmt.Errorf("unsupported strategy %q", req.Strategy))
 	}
 	if cfg.APIKey == "" {
-		return domain.AgentOutput{}, fmt.Errorf("missing API key: set AGENT_BENCH_OPENAI_API_KEY, OPENAI_API_KEY, or ORCAROUTER_API_KEY")
+		return fail(fmt.Errorf("missing API key: set AGENT_BENCH_OPENAI_API_KEY, OPENAI_API_KEY, or ORCAROUTER_API_KEY"))
 	}
 	if cfg.Model == "" {
-		return domain.AgentOutput{}, fmt.Errorf("AGENT_BENCH_OPENAI_MODEL is required")
+		return fail(fmt.Errorf("AGENT_BENCH_OPENAI_MODEL is required"))
 	}
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Timeout: 120 * time.Second}
@@ -73,13 +92,16 @@ func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOu
 
 	repo, err := filepath.Abs(req.Task.Repository.Path)
 	if err != nil {
-		return domain.AgentOutput{}, err
+		return fail(err)
 	}
 	if info, err := os.Stat(repo); err != nil || !info.IsDir() {
 		if err == nil {
 			err = fmt.Errorf("not a directory")
 		}
-		return domain.AgentOutput{}, fmt.Errorf("repository %s: %w", repo, err)
+		return fail(fmt.Errorf("repository %s: %w", repo, err))
+	}
+	if err := verifyRevision(repo, req.Task.Repository.Revision); err != nil {
+		return fail(err)
 	}
 
 	availableTools := toolSpecs()
@@ -87,17 +109,17 @@ func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOu
 	if req.Strategy == "graph" {
 		process, err := graphhost.Process(cfg.GraphHost, repo, cfg.NodeBin)
 		if err != nil {
-			return domain.AgentOutput{}, err
+			return fail(err)
 		}
 		graphClient, err = mcpstdio.Start(ctx, process)
 		if err != nil {
-			return domain.AgentOutput{}, err
+			return fail(err)
 		}
 		defer graphClient.Close()
 
 		mcpTools, err := graphClient.ListTools()
 		if err != nil {
-			return domain.AgentOutput{}, fmt.Errorf("list graph tools: %w", err)
+			return fail(fmt.Errorf("list graph tools: %w", err))
 		}
 		found := false
 		for _, t := range mcpTools {
@@ -115,7 +137,7 @@ func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOu
 			})
 		}
 		if !found {
-			return domain.AgentOutput{}, fmt.Errorf("%s not advertised by graph MCP", graphToolName)
+			return fail(fmt.Errorf("%s not advertised by graph MCP", graphToolName))
 		}
 	}
 
@@ -125,39 +147,57 @@ func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOu
 	}
 
 	var promptTokens, completionTokens int64
+	var usageObserved bool
+	var usageComplete = true
 	var toolCalls, graphToolCalls int64
+	state.Metrics.ToolCalls = &toolCalls
+	state.Metrics.GraphToolCalls = &graphToolCalls
+
 	for turn := 0; turn < cfg.MaxTurns; turn++ {
 		resp, err := chat(ctx, cfg, messages, availableTools)
 		if err != nil {
-			return domain.AgentOutput{}, err
+			if usageObserved {
+				state.Metrics.InputTokens = &promptTokens
+				state.Metrics.OutputTokens = &completionTokens
+			}
+			return fail(err)
 		}
-		promptTokens += resp.Usage.PromptTokens
-		completionTokens += resp.Usage.CompletionTokens
+		if resp.Model != "" {
+			state.Runtime.Model = resp.Model
+		}
+		if resp.Usage != nil {
+			usageObserved = true
+			promptTokens += resp.Usage.PromptTokens
+			completionTokens += resp.Usage.CompletionTokens
+		} else {
+			usageComplete = false
+		}
 		if len(resp.Choices) == 0 {
-			return domain.AgentOutput{}, fmt.Errorf("model returned no choices")
+			if usageObserved {
+				state.Metrics.InputTokens = &promptTokens
+				state.Metrics.OutputTokens = &completionTokens
+			}
+			return fail(fmt.Errorf("model returned no choices"))
 		}
 		msg := resp.Choices[0].Message
 
 		if len(msg.ToolCalls) == 0 {
 			result, err := parseFinal(msg.Content)
 			if err != nil {
-				return domain.AgentOutput{}, err
+				if usageObserved {
+					state.Metrics.InputTokens = &promptTokens
+					state.Metrics.OutputTokens = &completionTokens
+				}
+				return fail(err)
 			}
-			return domain.AgentOutput{
-				Answer:   result.Answer,
-				Evidence: result.Evidence,
-				Metrics: domain.AgentMetrics{
-					ToolCalls:      &toolCalls,
-					GraphToolCalls: &graphToolCalls,
-					InputTokens:    &promptTokens,
-					OutputTokens:   &completionTokens,
-				},
-				Runtime: domain.AgentRuntime{
-					Provider: providerName(cfg.BaseURL),
-					Model:    resp.Model,
-					Adapter:  "openai-compatible",
-				},
-			}, nil
+			state.Answer = result.Answer
+			state.Evidence = result.Evidence
+			if usageObserved {
+				state.Metrics.InputTokens = &promptTokens
+				state.Metrics.OutputTokens = &completionTokens
+			}
+			state.Metrics.Partial = !usageComplete
+			return state, nil
 		}
 
 		messages = append(messages, msg)
@@ -197,7 +237,32 @@ func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOu
 			})
 		}
 	}
-	return domain.AgentOutput{}, fmt.Errorf("max turns exceeded")
+	if usageObserved {
+		state.Metrics.InputTokens = &promptTokens
+		state.Metrics.OutputTokens = &completionTokens
+	}
+	return fail(fmt.Errorf("max turns exceeded"))
+}
+
+func verifyRevision(repo, revision string) error {
+	if !gitSHA.MatchString(strings.TrimSpace(revision)) {
+		return nil
+	}
+	head, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return fmt.Errorf("verify repository revision: %w", err)
+	}
+	if strings.TrimSpace(string(head)) != revision {
+		return fmt.Errorf("repository revision mismatch: expected %s got %s", revision, strings.TrimSpace(string(head)))
+	}
+	status, err := exec.Command("git", "-C", repo, "status", "--porcelain").Output()
+	if err != nil {
+		return fmt.Errorf("verify repository dirty state: %w", err)
+	}
+	if strings.TrimSpace(string(status)) != "" {
+		return fmt.Errorf("repository has uncommitted changes")
+	}
+	return nil
 }
 
 func systemPrompt(strategy string) string {
@@ -246,23 +311,21 @@ type functionSpec struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 
+type usage struct {
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+}
+
 type chatResponse struct {
 	Model   string `json:"model"`
 	Choices []struct {
 		Message message `json:"message"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int64 `json:"prompt_tokens"`
-		CompletionTokens int64 `json:"completion_tokens"`
-	} `json:"usage"`
+	Usage *usage `json:"usage,omitempty"`
 }
 
 func chat(ctx context.Context, cfg Config, messages []message, tools []tool) (chatResponse, error) {
-	body, err := json.Marshal(chatRequest{
-		Model: cfg.Model,
-		Messages: messages,
-		Tools: tools,
-	})
+	body, err := json.Marshal(chatRequest{Model: cfg.Model, Messages: messages, Tools: tools})
 	if err != nil {
 		return chatResponse{}, err
 	}
@@ -294,7 +357,15 @@ func chat(ctx context.Context, cfg Config, messages []message, tools []tool) (ch
 
 func toolSpecs() []tool {
 	object := func(properties map[string]any, required ...string) map[string]any {
-		return map[string]any{"type":"object","properties":properties,"required":required,"additionalProperties":false}
+		schema := map[string]any{
+			"type":                 "object",
+			"properties":           properties,
+			"additionalProperties": false,
+		}
+		if len(required) > 0 {
+			schema["required"] = required
+		}
+		return schema
 	}
 	return []tool{
 		{Type:"function", Function:functionSpec{Name:"list_files",Description:"List repository files under an optional directory.",Parameters:object(map[string]any{
@@ -313,12 +384,8 @@ func toolSpecs() []tool {
 }
 
 func providerName(baseURL string) string {
-	if strings.Contains(baseURL, "orcarouter.ai") {
-		return "orcarouter"
-	}
-	if strings.Contains(baseURL, "openai.com") {
-		return "openai"
-	}
+	if strings.Contains(baseURL, "orcarouter.ai") { return "orcarouter" }
+	if strings.Contains(baseURL, "openai.com") { return "openai" }
 	return "openai-compatible"
 }
 
@@ -333,16 +400,41 @@ func parseFinal(content string) (finalResult, error) {
 	content = strings.TrimPrefix(content, "```")
 	content = strings.TrimSuffix(content, "```")
 	content = strings.TrimSpace(content)
-	var out finalResult
-	if err := json.Unmarshal([]byte(content), &out); err != nil {
+	if content == "" || content == "null" {
+		return finalResult{}, fmt.Errorf("final answer must be a JSON object")
+	}
+	var raw struct {
+		Answer   *string         `json:"answer"`
+		Evidence json.RawMessage `json:"evidence"`
+	}
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
 		return finalResult{}, fmt.Errorf("final answer is not valid JSON: %w", err)
 	}
-	return out, nil
+	if raw.Answer == nil || len(raw.Evidence) == 0 || string(raw.Evidence) == "null" {
+		return finalResult{}, fmt.Errorf("final answer must contain answer and evidence")
+	}
+	var evidence struct {
+		Symbols       *[]string             `json:"symbols"`
+		Paths         *[]string             `json:"paths"`
+		Relationships *[]domain.Relationship `json:"relationships"`
+	}
+	if err := json.Unmarshal(raw.Evidence, &evidence); err != nil {
+		return finalResult{}, fmt.Errorf("invalid evidence: %w", err)
+	}
+	if evidence.Symbols == nil || evidence.Paths == nil || evidence.Relationships == nil {
+		return finalResult{}, fmt.Errorf("evidence must contain symbols, paths, and relationships arrays")
+	}
+	return finalResult{
+		Answer: *raw.Answer,
+		Evidence: domain.Evidence{
+			Symbols: *evidence.Symbols,
+			Paths: *evidence.Paths,
+			Relationships: *evidence.Relationships,
+		},
+	}, nil
 }
 
 func envOr(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
-	}
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" { return v }
 	return fallback
 }

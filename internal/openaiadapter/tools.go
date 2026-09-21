@@ -17,18 +17,11 @@ func runTool(root string, tc toolCall) (any, error) {
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil { return nil, err }
 		return listFiles(root, args.Path)
 	case "search_text":
-		var args struct {
-			Query string `json:"query"`
-			Path  string `json:"path"`
-		}
+		var args struct { Query string `json:"query"`; Path string `json:"path"` }
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil { return nil, err }
 		return searchText(root, args.Path, args.Query)
 	case "read_file":
-		var args struct {
-			Path string `json:"path"`
-			StartLine int `json:"startLine"`
-			EndLine int `json:"endLine"`
-		}
+		var args struct { Path string `json:"path"`; StartLine int `json:"startLine"`; EndLine int `json:"endLine"` }
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil { return nil, err }
 		return readFile(root, args.Path, args.StartLine, args.EndLine)
 	default:
@@ -37,14 +30,18 @@ func runTool(root string, tc toolCall) (any, error) {
 }
 
 func safePath(root, rel string) (string, error) {
+	rootResolved, err := filepath.EvalSymlinks(root)
+	if err != nil { return "", err }
 	rel = filepath.Clean(strings.TrimSpace(rel))
 	if rel == "." { rel = "" }
-	full := filepath.Join(root, rel)
-	check, err := filepath.Rel(root, full)
+	full := filepath.Join(rootResolved, rel)
+	resolved, err := filepath.EvalSymlinks(full)
+	if err != nil { return "", err }
+	check, err := filepath.Rel(rootResolved, resolved)
 	if err != nil || check == ".." || strings.HasPrefix(check, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path escapes repository")
 	}
-	return full, nil
+	return resolved, nil
 }
 
 func skipDir(name string) bool {
@@ -58,6 +55,8 @@ func skipDir(name string) bool {
 func listFiles(root, rel string) ([]string, error) {
 	start, err := safePath(root, rel)
 	if err != nil { return nil, err }
+	rootResolved, err := filepath.EvalSymlinks(root)
+	if err != nil { return nil, err }
 	var out []string
 	err = filepath.WalkDir(start, func(path string, d os.DirEntry, err error) error {
 		if err != nil { return err }
@@ -65,7 +64,9 @@ func listFiles(root, rel string) ([]string, error) {
 			if path != start && skipDir(d.Name()) { return filepath.SkipDir }
 			return nil
 		}
-		r, _ := filepath.Rel(root, path)
+		safe, err := safePath(rootResolved, path)
+		if err != nil { return nil }
+		r, _ := filepath.Rel(rootResolved, safe)
 		out = append(out, filepath.ToSlash(r))
 		if len(out) >= 300 { return filepath.SkipAll }
 		return nil
@@ -84,6 +85,8 @@ func searchText(root, rel, query string) ([]match, error) {
 	if strings.TrimSpace(query) == "" { return nil, fmt.Errorf("query is required") }
 	start, err := safePath(root, rel)
 	if err != nil { return nil, err }
+	rootResolved, err := filepath.EvalSymlinks(root)
+	if err != nil { return nil, err }
 	var out []match
 	err = filepath.WalkDir(start, func(path string, d os.DirEntry, err error) error {
 		if err != nil { return err }
@@ -91,9 +94,11 @@ func searchText(root, rel, query string) ([]match, error) {
 			if path != start && skipDir(d.Name()) { return filepath.SkipDir }
 			return nil
 		}
-		info, err := d.Info()
+		safe, err := safePath(rootResolved, path)
+		if err != nil { return nil }
+		info, err := os.Stat(safe)
 		if err != nil || info.Size() > 1<<20 { return nil }
-		f, err := os.Open(path)
+		f, err := os.Open(safe)
 		if err != nil { return nil }
 		defer f.Close()
 		s := bufio.NewScanner(f)
@@ -101,7 +106,7 @@ func searchText(root, rel, query string) ([]match, error) {
 		for s.Scan() {
 			line++
 			if strings.Contains(s.Text(), query) {
-				r, _ := filepath.Rel(root, path)
+				r, _ := filepath.Rel(rootResolved, safe)
 				out = append(out, match{Path:filepath.ToSlash(r),Line:line,Text:strings.TrimSpace(s.Text())})
 				if len(out) >= 50 { return filepath.SkipAll }
 			}
@@ -114,6 +119,7 @@ func searchText(root, rel, query string) ([]match, error) {
 func readFile(root, rel string, start, end int) (map[string]any, error) {
 	path, err := safePath(root, rel)
 	if err != nil { return nil, err }
+	rootResolved, _ := filepath.EvalSymlinks(root)
 	f, err := os.Open(path)
 	if err != nil { return nil, err }
 	defer f.Close()
@@ -131,5 +137,6 @@ func readFile(root, rel string, start, end int) (map[string]any, error) {
 		lines = append(lines, fmt.Sprintf("%d: %s", line, s.Text()))
 	}
 	if err := s.Err(); err != nil { return nil, err }
-	return map[string]any{"path":filepath.ToSlash(rel),"startLine":start,"endLine":start+len(lines)-1,"content":strings.Join(lines,"\n")}, nil
+	relPath, _ := filepath.Rel(rootResolved, path)
+	return map[string]any{"path":filepath.ToSlash(relPath),"startLine":start,"endLine":start+len(lines)-1,"content":strings.Join(lines,"\n")}, nil
 }

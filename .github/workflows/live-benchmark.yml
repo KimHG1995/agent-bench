@@ -8,9 +8,7 @@ on:
         required: true
         default: orcarouter
         type: choice
-        options:
-          - orcarouter
-          - openai
+        options: [orcarouter, openai]
       model:
         description: Model slug/name
         required: true
@@ -28,12 +26,15 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       ORCAROUTER_API_KEY: ${{ secrets.ORCAROUTER_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       AGENT_BENCH_TS_GRAPH_HOST: targets/ts-graph-tools
       AGENT_BENCH_OUT_DIR: results/live
+      AGENT_BENCH_EXPERIMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      AGENT_BENCH_HARNESS_REVISION: ${{ github.sha }}
+      AGENT_BENCH_GRAPH_REVISION: 6cc701bde596a955cb95824f67e896e13c10fff2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
@@ -44,29 +45,26 @@ jobs:
           node-version: "24"
 
       - name: Configure provider
+        id: configure
         shell: bash
         run: |
           set -euo pipefail
           case "${{ inputs.provider }}" in
             orcarouter)
-              if [[ -z "${ORCAROUTER_API_KEY:-}" ]]; then
-                echo "ORCAROUTER_API_KEY secret is not configured" >&2
-                exit 1
-              fi
+              test -n "${ORCAROUTER_API_KEY:-}" || { echo "ORCAROUTER_API_KEY secret is not configured" >&2; exit 1; }
               echo "AGENT_BENCH_OPENAI_BASE_URL=https://api.orcarouter.ai/v1" >> "$GITHUB_ENV"
               echo "AGENT_BENCH_OPENAI_API_KEY=$ORCAROUTER_API_KEY" >> "$GITHUB_ENV"
               ;;
             openai)
-              if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-                echo "OPENAI_API_KEY secret is not configured" >&2
-                exit 1
-              fi
+              test -n "${OPENAI_API_KEY:-}" || { echo "OPENAI_API_KEY secret is not configured" >&2; exit 1; }
               echo "AGENT_BENCH_OPENAI_BASE_URL=https://api.openai.com/v1" >> "$GITHUB_ENV"
               echo "AGENT_BENCH_OPENAI_API_KEY=$OPENAI_API_KEY" >> "$GITHUB_ENV"
               ;;
           esac
           echo "AGENT_BENCH_OPENAI_MODEL=${{ inputs.model }}" >> "$GITHUB_ENV"
           echo "AGENT_BENCH_REPEAT=${{ inputs.repeat }}" >> "$GITHUB_ENV"
+          safe_model="$(printf '%s' "${{ inputs.model }}" | tr '/\\:*?"<>|' '-')"
+          echo "artifact_name=agent-bench-${{ inputs.provider }}-$safe_model-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
 
       - name: Build
         run: |
@@ -79,12 +77,14 @@ jobs:
           bash scripts/prepare-ts-graph-tools.sh
 
       - name: Run paired baseline vs graph benchmark
+        id: benchmark
         run: bash scripts/run-openai-comparison.sh
 
       - name: Upload benchmark artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: "agent-bench-${{ inputs.provider }}-${{ inputs.model }}"
+          name: "${{ steps.configure.outputs.artifact_name || format('agent-bench-partial-{0}', github.run_id) }}"
           path: results/live/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
