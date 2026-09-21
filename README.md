@@ -196,3 +196,53 @@ expected와 actual의 precision, recall, F1을 계산하고 F1을 accuracy로 �
 3. 실제 결과를 바탕으로 task별 failure case 기록
 4. 공개 TypeScript OSS fixture 추가
 5. Codex adapter 추가
+
+
+## OpenAI / OrcaRouter
+
+Claude CLI와 별도로 OpenAI-compatible Chat Completions API를 사용하는 Go adapter가 있습니다.
+
+지원 대상:
+
+- OpenAI API
+- OrcaRouter
+- 기타 OpenAI-compatible endpoint
+
+OrcaRouter:
+
+```bash
+bash scripts/prepare-loglens.sh
+
+go build -o bin/agent-bench ./cmd/agent-bench
+go build -o bin/openai-adapter ./cmd/openai-adapter
+
+export AGENT_BENCH_OPENAI_BASE_URL=https://api.orcarouter.ai/v1
+export ORCAROUTER_API_KEY=...
+export AGENT_BENCH_OPENAI_MODEL=<model slug>
+
+./bin/agent-bench run \
+  -tasks benchmarks/loglens \
+  -strategy baseline \
+  -command './bin/openai-adapter' \
+  -repeat 3 \
+  -timeout 5m \
+  -out results/orcarouter-loglens.jsonl
+```
+
+OpenAI API는 base URL을 `https://api.openai.com/v1`로 두고 `OPENAI_API_KEY`와 모델명을 지정하면 같은 adapter를 사용합니다.
+
+### real-world target
+
+현재 실제 benchmark target은 agent-bench 자체가 아니라 공개 저장소 [loglens](https://github.com/KimHG1995/loglens)의 다음 commit으로 고정합니다.
+
+```text
+985d81ee1fb97570ae1f6da39775c7b0dec38db2
+```
+
+현재 real-world task:
+
+- latency report Controller → Service → Repository flow
+- spike detection Service → pure evaluator flow
+- ingest Controller → LogSink abstraction → concrete provider 관계
+
+자세한 실행 방법은 [OpenAI-compatible runbook](docs/003-openai-compatible/runbook.md)을 참고합니다.
