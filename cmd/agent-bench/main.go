@@ -47,6 +47,7 @@ func runCommand(args []string) error {
 	strategy := fs.String("strategy", "", "strategy name, e.g. baseline or graph")
 	command := fs.String("command", "", "external agent command")
 	repeat := fs.Int("repeat", 1, "number of runs per task")
+	runOffset := fs.Int("run-offset", 0, "offset added to run numbers, useful for split experiment files")
 	timeout := fs.Duration("timeout", 120*time.Second, "timeout per run")
 	out := fs.String("out", "results/results.jsonl", "output JSONL path")
 	if err := fs.Parse(args); err != nil {
@@ -58,6 +59,9 @@ func runCommand(args []string) error {
 	if strings.TrimSpace(*command) == "" {
 		return fmt.Errorf("-command is required")
 	}
+	if *runOffset < 0 {
+		return fmt.Errorf("-run-offset must be >= 0")
+	}
 
 	tasks, err := taskloader.LoadDir(*tasksDir)
 	if err != nil {
@@ -68,7 +72,7 @@ func runCommand(args []string) error {
 	}
 
 	r := runner.Runner{Agent: agent.CommandRunner{}, Timeout: *timeout}
-	results := r.Run(tasks, *strategy, *command, *repeat)
+	results := r.RunWithOffset(tasks, *strategy, *command, *repeat, *runOffset)
 	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
 		return err
 	}
