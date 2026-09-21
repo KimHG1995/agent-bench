@@ -4,245 +4,98 @@
 
 AI Coding Agent가 코드베이스를 이해하는 방식을 같은 조건에서 비교하는 **Go 기반 재현 가능한 벤치마크 도구**입니다.
 
-현재는 같은 Claude Code 모델을 두 조건으로 비교합니다.
+## 비교 전략
 
-- `baseline`: Read, Grep, Glob 기반 코드 탐색
-- `graph`: 동일한 도구에 TypeScript Code Graph MCP만 추가
-
-```text
-같은 model / effort / question / repository
-              |
-       +------+------+
-       |             |
-   baseline        graph
- Read/Grep/Glob   Read/Grep/Glob
-                       +
-                  Code Graph MCP
-       |             |
-       +------+------+
-              |
- accuracy / tool calls / tokens / latency
-```
-
-## 측정 항목
-
-- deterministic evidence accuracy
-- 전체 tool call 수
-- Code Graph tool call 수
-- input/output token
-- cache creation/read token
-- estimated cost
-- wall-clock latency
-- 전략별 median / p95 분포
-- 동일 task와 repeat를 묶은 baseline↔graph paired delta
-- 실행 실패와 evidence gap
-
-실측 데이터를 확보하기 전에는 특정 절감률이나 정확도 향상을 결과로 주장하지 않습니다.
-
-## SDD
-
-### MVP Core
-
-- [요구사항](docs/001-mvp/spec.md)
-- [설계](docs/001-mvp/design.md)
-- [작업](docs/001-mvp/tasks.md)
-
-### Claude Code Adapter
-
-- [요구사항](docs/002-claude-adapter/spec.md)
-- [설계](docs/002-claude-adapter/design.md)
-- [작업](docs/002-claude-adapter/tasks.md)
-
-## 정답 누출 방지
-
-Task 파일의 `expected`는 harness 내부 grader만 사용합니다.
+같은 모델, 같은 질문, 같은 저장소에서 context 접근 방식만 바꿉니다.
 
 ```text
-Task
- |\
- | +--> expected -----------------> grader only
- |
- +----> id/category/repo/question -> Agent
+baseline
+  list_files
+  search_text
+  read_file
+
+graph
+  list_files
+  search_text
+  read_file
+  inspect_typescript_graph (MCP)
 ```
 
-외부 Agent subprocess에는 정답이 전달되지 않으며 unit test로 고정합니다.
+현재 OpenAI-compatible adapter는 OpenAI API, OrcaRouter 및 호환 Chat Completions endpoint를 지원합니다.
 
-## 빌드
+## 실제 대상
+
+agent-bench 본체를 평가하지 않습니다.
+
+- target: [loglens](https://github.com/KimHG1995/loglens)
+- commit: `985d81ee1fb97570ae1f6da39775c7b0dec38db2`
+- graph host: [ts-graph-tools](https://github.com/KimHG1995/ts-graph-tools)
+- graph commit: `6cc701bde596a955cb95824f67e896e13c10fff2`
+
+## 측정
+
+- deterministic evidence F1
+- tool calls
+- graph tool calls
+- input/output tokens
+- latency
+- success/failure
+- median/p95
+- 동일 task/run의 paired baseline↔graph delta
+
+## 빌드와 검증
 
 ```bash
 go test ./...
 go vet ./...
 
 go build -o bin/agent-bench ./cmd/agent-bench
-go build -o bin/claude-adapter ./cmd/claude-adapter
-```
-
-외부 Go package는 사용하지 않습니다.
-
-## Claude Code 비교 실행
-
-두 조건의 모델과 effort를 동일하게 고정합니다.
-
-```bash
-export AGENT_BENCH_CLAUDE_MODEL=claude-sonnet-5
-export AGENT_BENCH_CLAUDE_EFFORT=medium
-```
-
-### Baseline
-
-```bash
-./bin/agent-bench run \
-  -tasks benchmarks \
-  -strategy baseline \
-  -command './bin/claude-adapter' \
-  -repeat 3 \
-  -timeout 5m \
-  -out results/baseline.jsonl
-```
-
-baseline은 Claude Code를 읽기 전용으로 격리합니다.
-
-```text
---bare
---tools Read,Grep,Glob
---strict-mcp-config
-```
-
-프로젝트 CLAUDE.md, plugin, skill, hook, 사용자 MCP가 비교에 섞이지 않도록 합니다.
-
-### Graph
-
-먼저 `ts-graph-tools`를 설치합니다.
-
-```bash
-git clone https://github.com/KimHG1995/ts-graph-tools.git ../ts-graph-tools
-cd ../ts-graph-tools
-npm install
-cd -
-
-export AGENT_BENCH_TS_GRAPH_HOST=../ts-graph-tools
-```
-
-실행:
-
-```bash
-./bin/agent-bench run \
-  -tasks benchmarks \
-  -strategy graph \
-  -command './bin/claude-adapter' \
-  -repeat 3 \
-  -timeout 5m \
-  -out results/graph.jsonl
-```
-
-graph는 baseline과 동일한 built-in tool에 다음 MCP 하나만 추가합니다.
-
-```text
-mcp__ts_graph__inspect_typescript_graph
-```
-
-직접 관리하는 MCP config가 있다면:
-
-```bash
-export AGENT_BENCH_GRAPH_MCP_CONFIG=/path/to/mcp.json
-```
-
-## Report
-
-```bash
-./bin/agent-bench report \
-  -inputs results/baseline.jsonl,results/graph.jsonl \
-  -out results/report.md
-```
-
-Raw JSONL은 보존하고 Markdown report는 다시 생성할 수 있습니다.
-
-리포트는 단순 평균만 보여주지 않습니다.
-
-- 전략별 accuracy mean / median
-- tool calls median / p95
-- I/O tokens median / p95
-- latency median / p95
-- 동일 `taskId + run`의 baseline과 graph를 직접 묶은 paired delta
-- task별 accuracy 차이
-- 실패 및 missing/unexpected evidence
-
-paired 비교는 양쪽 실행이 모두 성공한 경우만 포함하며, 관측되지 않은 metric은 0으로 대체하지 않습니다.
-
-## deterministic grading
-
-Agent evidence를 canonical fact로 바꿉니다.
-
-```text
-symbol:UserService.deleteUser
-path:src/user/user.service.ts
-relationship:UserController.deleteUser->UserService.deleteUser
-```
-
-expected와 actual의 precision, recall, F1을 계산하고 F1을 accuracy로 기록합니다.
-
-현재 category:
-
-- lookup
-- caller
-- flow
-- impact
-- architecture
-
-## 다음 단계
-
-1. 실제 Claude Code baseline / graph 반복 실행
-2. 공개 TypeScript OSS fixture 추가
-3. 실제 결과를 바탕으로 task별 failure case 기록
-4. 공개 TypeScript OSS fixture 추가
-5. Codex adapter 추가
-
-
-## OpenAI / OrcaRouter
-
-Claude CLI와 별도로 OpenAI-compatible Chat Completions API를 사용하는 Go adapter가 있습니다.
-
-지원 대상:
-
-- OpenAI API
-- OrcaRouter
-- 기타 OpenAI-compatible endpoint
-
-OrcaRouter:
-
-```bash
-bash scripts/prepare-loglens.sh
-
-go build -o bin/agent-bench ./cmd/agent-bench
 go build -o bin/openai-adapter ./cmd/openai-adapter
 
+bash scripts/prepare-loglens.sh
+bash scripts/prepare-ts-graph-tools.sh
+```
+
+CI에서는 실제 `@ttsc/graph` MCP를 띄우고 loglens에서 symbol lookup smoke까지 수행합니다.
+
+## OrcaRouter
+
+```bash
 export AGENT_BENCH_OPENAI_BASE_URL=https://api.orcarouter.ai/v1
 export ORCAROUTER_API_KEY=...
-export AGENT_BENCH_OPENAI_MODEL=<model slug>
+export AGENT_BENCH_OPENAI_MODEL=<model>
+export AGENT_BENCH_TS_GRAPH_HOST=targets/ts-graph-tools
 
-./bin/agent-bench run \
-  -tasks benchmarks/loglens \
-  -strategy baseline \
-  -command './bin/openai-adapter' \
-  -repeat 3 \
-  -timeout 5m \
-  -out results/orcarouter-loglens.jsonl
+AGENT_BENCH_REPEAT=3 bash scripts/run-openai-comparison.sh
 ```
 
-OpenAI API는 base URL을 `https://api.openai.com/v1`로 두고 `OPENAI_API_KEY`와 모델명을 지정하면 같은 adapter를 사용합니다.
+## OpenAI
 
-### real-world target
+```bash
+export AGENT_BENCH_OPENAI_BASE_URL=https://api.openai.com/v1
+export OPENAI_API_KEY=...
+export AGENT_BENCH_OPENAI_MODEL=<model>
+export AGENT_BENCH_TS_GRAPH_HOST=targets/ts-graph-tools
 
-현재 실제 benchmark target은 agent-bench 자체가 아니라 공개 저장소 [loglens](https://github.com/KimHG1995/loglens)의 다음 commit으로 고정합니다.
-
-```text
-985d81ee1fb97570ae1f6da39775c7b0dec38db2
+AGENT_BENCH_REPEAT=3 bash scripts/run-openai-comparison.sh
 ```
 
-현재 real-world task:
+## GitHub Actions 실측
 
-- latency report Controller → Service → Repository flow
-- spike detection Service → pure evaluator flow
-- ingest Controller → LogSink abstraction → concrete provider 관계
+Repository Secret:
 
-자세한 실행 방법은 [OpenAI-compatible runbook](docs/003-openai-compatible/runbook.md)을 참고합니다.
+- `ORCAROUTER_API_KEY` 또는
+- `OPENAI_API_KEY`
+
+이후 **Actions → live benchmark → Run workflow**에서 provider, model, repeat를 선택합니다.
+
+워크플로는 baseline과 graph 실행 순서를 반복마다 교차하고 raw JSONL 및 paired Markdown report를 artifact로 남깁니다.
+
+## SDD
+
+- [MVP](docs/001-mvp/spec.md)
+- [Claude adapter](docs/002-claude-adapter/spec.md)
+- [OpenAI-compatible adapter](docs/003-openai-compatible/spec.md)
+- [OpenAI-compatible graph comparison](docs/004-openai-graph/spec.md)
+
+실측 데이터를 확보하기 전에는 특정 절감률이나 정확도 향상을 결과로 주장하지 않습니다.

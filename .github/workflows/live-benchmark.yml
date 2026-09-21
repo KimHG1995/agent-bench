@@ -28,16 +28,20 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       ORCAROUTER_API_KEY: ${{ secrets.ORCAROUTER_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      AGENT_BENCH_TS_GRAPH_HOST: targets/ts-graph-tools
+      AGENT_BENCH_OUT_DIR: results/live
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
 
       - name: Configure provider
         shell: bash
@@ -60,33 +64,22 @@ jobs:
               echo "AGENT_BENCH_OPENAI_BASE_URL=https://api.openai.com/v1" >> "$GITHUB_ENV"
               echo "AGENT_BENCH_OPENAI_API_KEY=$OPENAI_API_KEY" >> "$GITHUB_ENV"
               ;;
-            *)
-              echo "unsupported provider: ${{ inputs.provider }}" >&2
-              exit 1
-              ;;
           esac
           echo "AGENT_BENCH_OPENAI_MODEL=${{ inputs.model }}" >> "$GITHUB_ENV"
+          echo "AGENT_BENCH_REPEAT=${{ inputs.repeat }}" >> "$GITHUB_ENV"
 
-      - name: Build benchmark binaries
+      - name: Build
         run: |
           go build -o bin/agent-bench ./cmd/agent-bench
           go build -o bin/openai-adapter ./cmd/openai-adapter
 
-      - name: Prepare fixed loglens target
-        run: bash scripts/prepare-loglens.sh
-
-      - name: Run benchmark
-        shell: bash
+      - name: Prepare fixed targets
         run: |
-          set -euo pipefail
-          mkdir -p results/live
-          ./bin/agent-bench run             -tasks benchmarks/loglens             -strategy baseline             -command './bin/openai-adapter'             -repeat "${{ inputs.repeat }}"             -timeout 5m             -out "results/live/${{ inputs.provider }}.jsonl"
+          bash scripts/prepare-loglens.sh
+          bash scripts/prepare-ts-graph-tools.sh
 
-      - name: Generate report
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./bin/agent-bench report             -inputs "results/live/${{ inputs.provider }}.jsonl"             -out "results/live/${{ inputs.provider }}.md"
+      - name: Run paired baseline vs graph benchmark
+        run: bash scripts/run-openai-comparison.sh
 
       - name: Upload benchmark artifact
         uses: actions/upload-artifact@v4

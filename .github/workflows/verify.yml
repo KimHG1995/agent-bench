@@ -15,11 +15,22 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
       - run: go test ./...
       - run: go vet ./...
       - run: go build -o bin/agent-bench ./cmd/agent-bench
       - run: go build -o bin/claude-adapter ./cmd/claude-adapter
       - run: go build -o bin/openai-adapter ./cmd/openai-adapter
+      - run: go build -o bin/graph-smoke ./cmd/graph-smoke
       - run: bash -n scripts/run-claude-comparison.sh
+      - run: bash -n scripts/run-openai-comparison.sh
       - run: bash -n scripts/prepare-loglens.sh
+      - run: bash -n scripts/prepare-ts-graph-tools.sh
       - run: bash scripts/prepare-loglens.sh
+      - run: bash scripts/prepare-ts-graph-tools.sh
+      - name: Real graph MCP smoke against loglens
+        env:
+          AGENT_BENCH_TS_GRAPH_HOST: targets/ts-graph-tools
+        run: ./bin/graph-smoke targets/loglens
