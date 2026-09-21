@@ -108,6 +108,12 @@ func TestDecodeFinalEnforcesSchema(t *testing.T) {
 	}
 }
 
+func TestGraphEscapeDoesNotClaimFactUse(t *testing.T) {
+	stream := `{"type":"item.completed","item":{"id":"g","type":"mcp_tool_call","server":"ts_graph","tool":"inspect_typescript_graph","status":"completed","result":{"structured_content":{"result":{"type":"escape","skipped":true}}}}}`+"\n"+finalEvent()+usageEvent
+	out,err:=parseStream(strings.NewReader(stream),"graph")
+	if err!=nil || *out.Metrics.GraphToolCallsSucceeded!=1 || *out.Metrics.GraphFactCallsSucceeded!=0 || *out.Metrics.GraphUsed { t.Fatalf("escape claimed facts: %#v %v",out,err) }
+}
+
 func TestCapturedSmokeEvents(t *testing.T) {
 	for _, tc := range []struct {
 		name, strategy   string
