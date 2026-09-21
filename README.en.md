@@ -2,95 +2,143 @@
 
 [한국어](README.md)
 
-A reproducible Go benchmark for comparing how the same coding model understands a codebase with different context-access strategies.
+**An eval harness for checking whether Code Graph actually helps coding agents.**
 
-## Strategies
+I built this to evaluate `ts-graph-tools` with Codex using the same repository, task, model settings, and time budget.
+
+Instead of assuming that an MCP tool makes an agent faster or more accurate, agent-bench measures the trade-off.
+
+## Why it exists
+
+`ts-graph-tools` exposes compiler-resolved TypeScript symbols, callers, flows, and impact relationships to coding agents.
+
+The question is whether that context actually helps.
+
+```text
+Codex with file exploration
+          vs
+the same Codex + Code Graph MCP
+```
+
+agent-bench runs both conditions repeatedly and records evidence quality, tool calls, tokens, latency, and failures.
+
+Its job is not to prove that Graph wins. Its job is to catch when a change helps, hurts, or simply moves cost somewhere else.
+
+## What I use it for
+
+- measure ts-graph-tools changes before and after
+- check whether smaller Graph responses actually reduce tokens
+- test prompt or MCP-description changes
+- compare model/effort settings under the same task
+- detect regressions in accuracy, tool usage, or latency
+
+## Current experiment
+
+The current real-world target is [loglens](https://github.com/KimHG1995/loglens), pinned to a fixed commit.
 
 ```text
 baseline
-  list_files
-  search_text
-  read_file
+  Codex
+  + read-only shell
 
 graph
-  the same local tools
-  + inspect_typescript_graph (MCP)
+  same Codex
+  + same read-only shell
+  + inspect_typescript_graph
 ```
 
-The OpenAI-compatible adapter supports OpenAI, OrcaRouter, and compatible Chat Completions endpoints. A Claude Code adapter also remains available.
+Pinned inputs:
 
-The Codex CLI adapter reuses an existing ChatGPT login. Its baseline uses Codex's read-only shell, and graph adds the pinned MCP inspection tool. Tool-call counts across adapters have different semantics and should not be compared directly.
+- loglens: `985d81ee1fb97570ae1f6da39775c7b0dec38db2`
+- ts-graph-tools: `6cc701bde596a955cb95824f67e896e13c10fff2`
 
-## Fixed real-world target
+The current dataset contains three code-understanding tasks covering request flow, dependency injection, and spike-detection logic.
 
-- target: [loglens](https://github.com/KimHG1995/loglens)
-- commit: `985d81ee1fb97570ae1f6da39775c7b0dec38db2`
-- graph host: [ts-graph-tools](https://github.com/KimHG1995/ts-graph-tools)
-- graph commit: `6cc701bde596a955cb95824f67e896e13c10fff2`
+## Measured result
 
-## Measurement
+Codex experiment from 2026-09-21:
 
-- deterministic expected-evidence F1
-- required-evidence recall and precision; unexpected facts are not necessarily incorrect
-- tool calls and graph tool calls
+- 3 tasks
+- baseline vs graph
+- 3 repeats each
+- 18 executions
+- 9 paired comparisons
+- 18/18 completed successfully
+
+| Metric | Graph change |
+| --- | ---: |
+| Evidence F1 | +0.039 |
+| Tool calls | -25.0% |
+| Input + output tokens | +23.9% |
+| Latency | +24.7% |
+
+Graph reduced tool calls, but it did **not** reduce tokens or execution time in this sample.
+
+That result is the reason this repository exists: without an eval harness, "fewer tool calls" could easily be mistaken for "more efficient."
+
+See [measured results](docs/005-codex-adapter/live-benchmark.md) for the full conditions and limitations.
+
+## What it measures
+
+- required evidence recall
+- evidence precision / F1
+- tool calls
+- Graph calls
 - observed input/output tokens
-- latency and completion rate
-- median/p95 summaries
-- paired baseline-vs-graph deltas only for comparable experiment identities
+- latency
+- completion/failure
+- paired baseline-vs-graph deltas
 
-Unobserved or partial token usage is not treated as zero.
+Evidence F1 is not a natural-language answer-quality score. It compares extracted symbols, paths, and relationships against a fixed expected set.
 
-## Integrity safeguards
-
-- expected answers are never sent to the Agent
-- Git targets with fixed SHA are checked for HEAD and dirty state before execution
-- repository file tools reject symlink escapes
-- each run is flushed to JSONL immediately
-- existing result files are not overwritten by default
-- timeout kills the subprocess process group on Unix
-- reports reject mismatched model/revision pairs and duplicate rows
-- live workflows preserve partial artifacts even when a run fails
-
-## Run
+## Run with Codex
 
 ```bash
+codex login status
+
+go build -o bin/agent-bench ./cmd/agent-bench
+go build -o bin/codex-adapter ./cmd/codex-adapter
+
 bash scripts/prepare-loglens.sh
 bash scripts/prepare-ts-graph-tools.sh
 
-go build -o bin/agent-bench ./cmd/agent-bench
-go build -o bin/openai-adapter ./cmd/openai-adapter
-go build -o bin/codex-adapter ./cmd/codex-adapter
+export AGENT_BENCH_CODEX_MODEL=<model>
+export AGENT_BENCH_CODEX_EFFORT=<effort>
+export AGENT_BENCH_TS_GRAPH_HOST=targets/ts-graph-tools
+export AGENT_BENCH_OUT_DIR=results/codex-run
+
+AGENT_BENCH_REPEAT=3 bash scripts/run-codex-comparison.sh
 ```
 
-For OrcaRouter:
+[Codex runbook](docs/005-codex-adapter/runbook.md)
+
+## OpenAI-compatible APIs
+
+OpenAI-compatible Chat Completions endpoints are also supported.
 
 ```bash
-export AGENT_BENCH_OPENAI_BASE_URL=https://api.orcarouter.ai/v1
-export ORCAROUTER_API_KEY=...
+export AGENT_BENCH_OPENAI_BASE_URL=<base-url>
+export AGENT_BENCH_OPENAI_API_KEY=<key>
 export AGENT_BENCH_OPENAI_MODEL=<model>
 export AGENT_BENCH_TS_GRAPH_HOST=targets/ts-graph-tools
 
 AGENT_BENCH_REPEAT=3 bash scripts/run-openai-comparison.sh
 ```
 
-## Codex with ChatGPT login
+Tool-call counts should not be compared directly across different adapters because their tool semantics differ.
 
-```bash
-codex login status
-export AGENT_BENCH_CODEX_MODEL=gpt-6-astra
-export AGENT_BENCH_CODEX_EFFORT=xhigh
-export AGENT_BENCH_TS_GRAPH_HOST=targets/ts-graph-tools
-export AGENT_BENCH_OUT_DIR=results/codex-example
+## What this is not
 
-AGENT_BENCH_REPEAT=3 bash scripts/run-codex-comparison.sh
-```
+- not a general LLM leaderboard
+- not a model-ranking project
+- not a project designed to prove that Graph always wins
+- not evidence that three tasks generalize to all TypeScript repositories
 
-Select a model available to your account explicitly. This uses your Codex allowance, not an API key. No provider/model fallback occurs. The default experiment is 3 tasks × 2 strategies × 3 repeats. A new output directory is required; fatal authentication/quota failures stop remaining calls after persisting results.
+The current goal is simple: **when I change a coding-agent context tool, I want a reproducible way to tell whether it actually got better.**
 
-Each run retains JSONL events, stderr, final JSON, a manifest and a fresh pinned target archive. The adapter checks schema, source integrity and Graph execution. Reports compare effort, tier, CLI/config fingerprints, time budgets and context/target hashes; a successful CLI exit cannot hide an invalid Graph measurement. Valid Graph nonuse is retained.
+## Docs
 
-Actual serving model and dollar cost remain unknown when unobserved. Host context is fingerprinted, not fully isolated, and target dependencies are not installed in the archive. See the [specification](docs/005-codex-adapter/spec.md), [runbook](docs/005-codex-adapter/runbook.md), [measured results](docs/005-codex-adapter/live-benchmark.md), and [roadmap](docs/005-codex-adapter/roadmap.md).
-
-The 2026-09-21 integration experiment completed 18/18 runs with 9/9 comparable pairs. Median paired Graph changes were −25.0% tool calls, +23.9% total input/output tokens, and +24.7% latency. This sample did not demonstrate overall token or time savings; task-level outcomes and exact-evidence formatting limitations are recorded alongside the measurements.
-
-Small-sample measurements describe only the recorded experiment. Do not generalize them into universal savings or accuracy claims.
+- [Codex adapter spec](docs/005-codex-adapter/spec.md)
+- [Runbook](docs/005-codex-adapter/runbook.md)
+- [Measured results](docs/005-codex-adapter/live-benchmark.md)
+- [Roadmap](docs/005-codex-adapter/roadmap.md)
