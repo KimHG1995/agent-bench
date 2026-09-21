@@ -2,39 +2,39 @@
 
 [한국어](README.md)
 
-**An eval harness for checking whether Code Graph actually helps coding agents.**
+**An eval harness for checking whether an existing Code Graph tool actually helps a coding agent.**
 
-I built this to evaluate `ts-graph-tools` with Codex using the same repository, task, model settings, and time budget.
+This project does not implement a TypeScript Code Graph engine.
 
-Instead of assuming that an MCP tool makes an agent faster or more accurate, agent-bench measures the trade-off.
+It connects the existing `@ttsc/graph` tool to Codex through [ts-graph-tools](https://github.com/KimHG1995/ts-graph-tools), then compares that setup with file-only exploration under the same repository, task, model settings, and time budget.
 
 ## Why it exists
 
-`ts-graph-tools` exposes compiler-resolved TypeScript symbols, callers, flows, and impact relationships to coding agents.
+`@ttsc/graph` provides compiler-resolved TypeScript symbols, callers, flows, and impact relationships.
 
-The question is whether that context actually helps.
+`ts-graph-tools` is the external host/integration setup used to expose that existing tool to coding agents without installing it into the target repository.
+
+The question is whether that integration actually helps.
 
 ```text
 Codex with file exploration
           vs
-the same Codex + Code Graph MCP
+the same Codex + @ttsc/graph MCP
 ```
 
-agent-bench runs both conditions repeatedly and records evidence quality, tool calls, tokens, latency, and failures.
+agent-bench measures evidence quality, tool calls, tokens, latency, and failures.
 
-Its job is not to prove that Graph wins. Its job is to catch when a change helps, hurts, or simply moves cost somewhere else.
+Its job is not to prove that Graph wins. Its job is to catch when an integration or configuration change helps, hurts, or simply moves cost somewhere else.
 
 ## What I use it for
 
-- measure ts-graph-tools changes before and after
-- check whether smaller Graph responses actually reduce tokens
-- test prompt or MCP-description changes
-- compare model/effort settings under the same task
-- detect regressions in accuracy, tool usage, or latency
+- evaluate changes in how `@ttsc/graph` is exposed to the agent
+- test MCP-description or prompt changes
+- check whether smaller Graph responses reduce tokens
+- compare Codex model/effort settings under the same task
+- detect regressions in accuracy, token usage, or latency
 
 ## Current experiment
-
-The current real-world target is [loglens](https://github.com/KimHG1995/loglens), pinned to a fixed commit.
 
 ```text
 baseline
@@ -44,15 +44,14 @@ baseline
 graph
   same Codex
   + same read-only shell
-  + inspect_typescript_graph
+  + inspect_typescript_graph from @ttsc/graph
 ```
 
 Pinned inputs:
 
-- loglens: `985d81ee1fb97570ae1f6da39775c7b0dec38db2`
-- ts-graph-tools: `6cc701bde596a955cb95824f67e896e13c10fff2`
-
-The current dataset contains three code-understanding tasks covering request flow, dependency injection, and spike-detection logic.
+- target: [loglens](https://github.com/KimHG1995/loglens) at `985d81ee1fb97570ae1f6da39775c7b0dec38db2`
+- graph integration host: [ts-graph-tools](https://github.com/KimHG1995/ts-graph-tools)
+- upstream graph: `@ttsc/graph@0.19.3`
 
 ## Measured result
 
@@ -65,80 +64,24 @@ Codex experiment from 2026-09-21:
 - 9 paired comparisons
 - 18/18 completed successfully
 
-| Metric | Graph change |
+| Metric | Change with Graph integration |
 | --- | ---: |
 | Evidence F1 | +0.039 |
 | Tool calls | -25.0% |
 | Input + output tokens | +23.9% |
 | Latency | +24.7% |
 
-Graph reduced tool calls, but it did **not** reduce tokens or execution time in this sample.
+The Graph-enabled setup reduced tool calls, but did **not** reduce tokens or execution time in this sample.
 
-That result is the reason this repository exists: without an eval harness, "fewer tool calls" could easily be mistaken for "more efficient."
+That result is the reason this repository exists: to evaluate integration choices rather than assume that adding an MCP tool makes an agent more efficient.
 
 See [measured results](docs/005-codex-adapter/live-benchmark.md) for the full conditions and limitations.
 
-## What it measures
-
-- required evidence recall
-- evidence precision / F1
-- tool calls
-- Graph calls
-- observed input/output tokens
-- latency
-- completion/failure
-- paired baseline-vs-graph deltas
-
-Evidence F1 is not a natural-language answer-quality score. It compares extracted symbols, paths, and relationships against a fixed expected set.
-
-## Run with Codex
-
-```bash
-codex login status
-
-go build -o bin/agent-bench ./cmd/agent-bench
-go build -o bin/codex-adapter ./cmd/codex-adapter
-
-bash scripts/prepare-loglens.sh
-bash scripts/prepare-ts-graph-tools.sh
-
-export AGENT_BENCH_CODEX_MODEL=<model>
-export AGENT_BENCH_CODEX_EFFORT=<effort>
-export AGENT_BENCH_TS_GRAPH_HOST=targets/ts-graph-tools
-export AGENT_BENCH_OUT_DIR=results/codex-run
-
-AGENT_BENCH_REPEAT=3 bash scripts/run-codex-comparison.sh
-```
-
-[Codex runbook](docs/005-codex-adapter/runbook.md)
-
-## OpenAI-compatible APIs
-
-OpenAI-compatible Chat Completions endpoints are also supported.
-
-```bash
-export AGENT_BENCH_OPENAI_BASE_URL=<base-url>
-export AGENT_BENCH_OPENAI_API_KEY=<key>
-export AGENT_BENCH_OPENAI_MODEL=<model>
-export AGENT_BENCH_TS_GRAPH_HOST=targets/ts-graph-tools
-
-AGENT_BENCH_REPEAT=3 bash scripts/run-openai-comparison.sh
-```
-
-Tool-call counts should not be compared directly across different adapters because their tool semantics differ.
-
 ## What this is not
 
+- not a TypeScript Code Graph implementation
 - not a general LLM leaderboard
 - not a model-ranking project
 - not a project designed to prove that Graph always wins
-- not evidence that three tasks generalize to all TypeScript repositories
 
-The current goal is simple: **when I change a coding-agent context tool, I want a reproducible way to tell whether it actually got better.**
-
-## Docs
-
-- [Codex adapter spec](docs/005-codex-adapter/spec.md)
-- [Runbook](docs/005-codex-adapter/runbook.md)
-- [Measured results](docs/005-codex-adapter/live-benchmark.md)
-- [Roadmap](docs/005-codex-adapter/roadmap.md)
+The current goal is simple: **when I connect an existing developer tool to a coding agent, I want a reproducible way to tell whether the integration actually helped.**
