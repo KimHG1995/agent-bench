@@ -26,22 +26,50 @@ type Task struct {
 	Expected   Evidence      `json:"expected"`
 }
 
+type AgentTask struct {
+	ID         string        `json:"id"`
+	Category   string        `json:"category"`
+	Repository RepositoryRef `json:"repository"`
+	Question   string        `json:"question"`
+}
+
+func (t Task) ForAgent() AgentTask {
+	return AgentTask{
+		ID:         t.ID,
+		Category:   t.Category,
+		Repository: t.Repository,
+		Question:   t.Question,
+	}
+}
+
 type RunRequest struct {
-	Strategy string `json:"strategy"`
-	Run      int    `json:"run"`
-	Task     Task   `json:"task"`
+	Strategy string    `json:"strategy"`
+	Run      int       `json:"run"`
+	Task     AgentTask `json:"task"`
+}
+
+type AgentRuntime struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Adapter  string `json:"adapter,omitempty"`
+	Effort   string `json:"effort,omitempty"`
 }
 
 type AgentMetrics struct {
-	ToolCalls    *int64 `json:"toolCalls,omitempty"`
-	InputTokens  *int64 `json:"inputTokens,omitempty"`
-	OutputTokens *int64 `json:"outputTokens,omitempty"`
+	ToolCalls                *int64   `json:"toolCalls,omitempty"`
+	GraphToolCalls           *int64   `json:"graphToolCalls,omitempty"`
+	InputTokens              *int64   `json:"inputTokens,omitempty"`
+	OutputTokens             *int64   `json:"outputTokens,omitempty"`
+	CacheCreationInputTokens *int64   `json:"cacheCreationInputTokens,omitempty"`
+	CacheReadInputTokens     *int64   `json:"cacheReadInputTokens,omitempty"`
+	CostUSD                  *float64 `json:"costUsd,omitempty"`
 }
 
 type AgentOutput struct {
 	Answer   string       `json:"answer"`
 	Evidence Evidence     `json:"evidence"`
 	Metrics  AgentMetrics `json:"metrics"`
+	Runtime  AgentRuntime `json:"runtime"`
 }
 
 type Grade struct {
@@ -71,4 +99,5 @@ type RunResult struct {
 	Error      string        `json:"error,omitempty"`
 	Answer     string        `json:"answer,omitempty"`
 	Metrics    AgentMetrics  `json:"metrics"`
+	Runtime    AgentRuntime  `json:"runtime"`
 }
