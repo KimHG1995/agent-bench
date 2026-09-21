@@ -1,0 +1,97 @@
+name: live benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: API provider
+        required: true
+        default: orcarouter
+        type: choice
+        options:
+          - orcarouter
+          - openai
+      model:
+        description: Model slug/name
+        required: true
+        default: orcarouter/auto
+        type: string
+      repeat:
+        description: Repeats per task
+        required: true
+        default: "3"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ORCAROUTER_API_KEY: ${{ secrets.ORCAROUTER_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Configure provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.provider }}" in
+            orcarouter)
+              if [[ -z "${ORCAROUTER_API_KEY:-}" ]]; then
+                echo "ORCAROUTER_API_KEY secret is not configured" >&2
+                exit 1
+              fi
+              echo "AGENT_BENCH_OPENAI_BASE_URL=https://api.orcarouter.ai/v1" >> "$GITHUB_ENV"
+              echo "AGENT_BENCH_OPENAI_API_KEY=$ORCAROUTER_API_KEY" >> "$GITHUB_ENV"
+              ;;
+            openai)
+              if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+                echo "OPENAI_API_KEY secret is not configured" >&2
+                exit 1
+              fi
+              echo "AGENT_BENCH_OPENAI_BASE_URL=https://api.openai.com/v1" >> "$GITHUB_ENV"
+              echo "AGENT_BENCH_OPENAI_API_KEY=$OPENAI_API_KEY" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "unsupported provider: ${{ inputs.provider }}" >&2
+              exit 1
+              ;;
+          esac
+          echo "AGENT_BENCH_OPENAI_MODEL=${{ inputs.model }}" >> "$GITHUB_ENV"
+
+      - name: Build benchmark binaries
+        run: |
+          go build -o bin/agent-bench ./cmd/agent-bench
+          go build -o bin/openai-adapter ./cmd/openai-adapter
+
+      - name: Prepare fixed loglens target
+        run: bash scripts/prepare-loglens.sh
+
+      - name: Run benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p results/live
+          ./bin/agent-bench run             -tasks benchmarks/loglens             -strategy baseline             -command './bin/openai-adapter'             -repeat "${{ inputs.repeat }}"             -timeout 5m             -out "results/live/${{ inputs.provider }}.jsonl"
+
+      - name: Generate report
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/agent-bench report             -inputs "results/live/${{ inputs.provider }}.jsonl"             -out "results/live/${{ inputs.provider }}.md"
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "agent-bench-${{ inputs.provider }}-${{ inputs.model }}"
+          path: results/live/
+          if-no-files-found: error
+          retention-days: 14
