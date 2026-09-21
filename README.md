@@ -33,6 +33,8 @@ AI Coding Agent가 코드베이스를 이해하는 방식을 같은 조건에서
 - cache creation/read token
 - estimated cost
 - wall-clock latency
+- 전략별 median / p95 분포
+- 동일 task와 repeat를 묶은 baseline↔graph paired delta
 - 실행 실패와 evidence gap
 
 실측 데이터를 확보하기 전에는 특정 절감률이나 정확도 향상을 결과로 주장하지 않습니다.
@@ -155,6 +157,18 @@ export AGENT_BENCH_GRAPH_MCP_CONFIG=/path/to/mcp.json
 
 Raw JSONL은 보존하고 Markdown report는 다시 생성할 수 있습니다.
 
+리포트는 단순 평균만 보여주지 않습니다.
+
+- 전략별 accuracy mean / median
+- tool calls median / p95
+- I/O tokens median / p95
+- latency median / p95
+- 동일 `taskId + run`의 baseline과 graph를 직접 묶은 paired delta
+- task별 accuracy 차이
+- 실패 및 missing/unexpected evidence
+
+paired 비교는 양쪽 실행이 모두 성공한 경우만 포함하며, 관측되지 않은 metric은 0으로 대체하지 않습니다.
+
 ## deterministic grading
 
 Agent evidence를 canonical fact로 바꿉니다.
@@ -179,6 +193,6 @@ expected와 actual의 precision, recall, F1을 계산하고 F1을 accuracy로 �
 
 1. 실제 Claude Code baseline / graph 반복 실행
 2. 공개 TypeScript OSS fixture 추가
-3. task별 failure case 기록
-4. median / p95와 결과 분포 추가
+3. 실제 결과를 바탕으로 task별 failure case 기록
+4. 공개 TypeScript OSS fixture 추가
 5. Codex adapter 추가
