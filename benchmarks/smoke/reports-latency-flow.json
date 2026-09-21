@@ -1,0 +1,31 @@
+{
+  "id": "smoke-loglens-reports-latency-flow",
+  "category": "flow",
+  "repository": {
+    "path": "targets/loglens",
+    "revision": "985d81ee1fb97570ae1f6da39775c7b0dec38db2"
+  },
+  "question": "Trace the latency report request from the controller method to the repository method that queries ClickHouse.",
+  "expected": {
+    "symbols": [
+      "ReportsController.latency",
+      "ReportsService.latency",
+      "ReportsRepository.findLatency"
+    ],
+    "paths": [
+      "src/modules/admin/controllers/reports.controller.ts",
+      "src/modules/admin/services/reports.service.ts",
+      "src/modules/admin/repositories/reports.repository.ts"
+    ],
+    "relationships": [
+      {
+        "from": "ReportsController.latency",
+        "to": "ReportsService.latency"
+      },
+      {
+        "from": "ReportsService.latency",
+        "to": "ReportsRepository.findLatency"
+      }
+    ]
+  }
+}

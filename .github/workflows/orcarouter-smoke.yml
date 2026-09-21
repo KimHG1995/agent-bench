@@ -1,0 +1,74 @@
+name: orcarouter free smoke
+
+on:
+  push:
+    branches:
+      - smoke/orcarouter-live
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ORCAROUTER_API_KEY: ${{ secrets.ORCAROUTER_API_KEY }}
+      AGENT_BENCH_OPENAI_BASE_URL: https://api.orcarouter.ai/v1
+      AGENT_BENCH_OPENAI_MODEL: orcarouter/free
+      AGENT_BENCH_OPENAI_MAX_TURNS: "8"
+      AGENT_BENCH_TS_GRAPH_HOST: targets/ts-graph-tools
+      AGENT_BENCH_TASKS: benchmarks/smoke
+      AGENT_BENCH_REPEAT: "1"
+      AGENT_BENCH_TIMEOUT: 3m
+      AGENT_BENCH_OUT_DIR: results/smoke
+      AGENT_BENCH_EXPERIMENT_ID: smoke-${{ github.run_id }}
+      AGENT_BENCH_HARNESS_REVISION: ${{ github.sha }}
+      AGENT_BENCH_GRAPH_REVISION: 6cc701bde596a955cb95824f67e896e13c10fff2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Verify OrcaRouter secret
+        run: |
+          if [[ -z "${ORCAROUTER_API_KEY:-}" ]]; then
+            echo "ORCAROUTER_API_KEY secret is not configured in this repository" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: |
+          go build -o bin/agent-bench ./cmd/agent-bench
+          go build -o bin/openai-adapter ./cmd/openai-adapter
+
+      - name: Prepare fixed targets
+        run: |
+          bash scripts/prepare-loglens.sh
+          bash scripts/prepare-ts-graph-tools.sh
+
+      - name: Run free-model baseline vs graph smoke
+        run: bash scripts/run-openai-comparison.sh
+
+      - name: Print report
+        if: always()
+        run: |
+          if [[ -f results/smoke/report.md ]]; then
+            cat results/smoke/report.md
+          fi
+
+      - name: Upload smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "orcarouter-free-smoke-${{ github.run_id }}"
+          path: results/smoke/
+          if-no-files-found: warn
+          retention-days: 7
