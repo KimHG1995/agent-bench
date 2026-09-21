@@ -10,33 +10,35 @@
 
 ## Phase 2. Go Core
 
-- [ ] Go module 초기화
-- [ ] domain type 구현
-- [ ] JSON task loader 구현
-- [ ] command agent 구현
-- [ ] deterministic grader 구현
-- [ ] benchmark runner 구현
-- [ ] JSONL result writer 구현
-- [ ] Markdown report 구현
-- [ ] CLI run/report 구현
+- [x] Go module 초기화
+- [x] domain type 구현
+- [x] JSON task loader 구현
+- [x] command agent 구현
+- [x] deterministic grader 구현
+- [x] benchmark runner 구현
+- [x] JSONL result writer 구현
+- [x] Markdown report 구현
+- [x] CLI run/report 구현
 
 ## Phase 3. Fixture
 
-- [ ] synthetic TypeScript fixture 추가
-- [ ] lookup benchmark 추가
-- [ ] caller benchmark 추가
-- [ ] flow benchmark 추가
-- [ ] impact benchmark 추가
-- [ ] architecture benchmark 추가
+- [x] synthetic TypeScript fixture 추가
+- [x] lookup benchmark 추가
+- [x] caller benchmark 추가
+- [x] flow benchmark 추가
+- [x] impact benchmark 추가
+- [x] architecture benchmark 추가
 
 ## Phase 4. Verification
 
-- [ ] grader unit test
-- [ ] task loader unit test
-- [ ] report unit test
-- [ ] command agent integration test
-- [ ] go test ./... 통과
-- [ ] GitHub Actions 추가
+- [x] grader unit test
+- [x] task loader unit test
+- [x] report unit test
+- [x] command agent integration test
+- [x] go test ./... 통과
+- [x] go vet ./... 통과
+- [x] GitHub Actions 추가
+- [x] mock agent 기반 end-to-end run/report 확인
 
 ## Phase 5. Agent Integration
 

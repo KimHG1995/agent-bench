@@ -1,0 +1,14 @@
+{
+  "id": "flow-001",
+  "category": "flow",
+  "repository": {"path": "fixtures/nestjs-sample", "revision": "fixture-v1"},
+  "question": "사용자 삭제 요청이 Controller에서 Repository까지 어떤 호출 흐름으로 이어지는가?",
+  "expected": {
+    "symbols": ["UserController.deleteUser", "UserService.deleteUser", "UserRepository.deleteById"],
+    "paths": ["src/user/user.controller.ts", "src/user/user.service.ts", "src/user/user.repository.ts"],
+    "relationships": [
+      {"from": "UserController.deleteUser", "to": "UserService.deleteUser"},
+      {"from": "UserService.deleteUser", "to": "UserRepository.deleteById"}
+    ]
+  }
+}

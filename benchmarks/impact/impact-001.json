@@ -1,0 +1,14 @@
+{
+  "id": "impact-001",
+  "category": "impact",
+  "repository": {"path": "fixtures/nestjs-sample", "revision": "fixture-v1"},
+  "question": "UserService.deleteUser 변경 시 직접 영향을 받는 호출자와 테스트를 찾아라.",
+  "expected": {
+    "symbols": ["UserService.deleteUser", "UserController.deleteUser", "userServiceDeleteTest"],
+    "paths": ["src/user/user.service.ts", "src/user/user.controller.ts", "src/user/user.service.spec.ts"],
+    "relationships": [
+      {"from": "UserController.deleteUser", "to": "UserService.deleteUser"},
+      {"from": "userServiceDeleteTest", "to": "UserService.deleteUser"}
+    ]
+  }
+}
