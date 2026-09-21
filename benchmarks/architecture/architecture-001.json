@@ -1,0 +1,15 @@
+{
+  "id": "architecture-001",
+  "category": "architecture",
+  "repository": {"path": "fixtures/nestjs-sample", "revision": "fixture-v1"},
+  "question": "사용자 삭제 기능의 주요 계층과 감사 기록 의존성을 설명하라.",
+  "expected": {
+    "symbols": ["UserController", "UserService", "UserRepository", "AuditService"],
+    "paths": ["src/user/user.controller.ts", "src/user/user.service.ts", "src/user/user.repository.ts", "src/audit/audit.service.ts"],
+    "relationships": [
+      {"from": "UserController.deleteUser", "to": "UserService.deleteUser"},
+      {"from": "UserService.deleteUser", "to": "UserRepository.deleteById"},
+      {"from": "UserService.deleteUser", "to": "AuditService.record"}
+    ]
+  }
+}

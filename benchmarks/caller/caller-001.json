@@ -1,0 +1,13 @@
+{
+  "id": "caller-001",
+  "category": "caller",
+  "repository": {"path": "fixtures/nestjs-sample", "revision": "fixture-v1"},
+  "question": "UserService.deleteUser를 호출하는 API 진입점을 찾아라.",
+  "expected": {
+    "symbols": ["UserService.deleteUser", "UserController.deleteUser"],
+    "paths": ["src/user/user.service.ts", "src/user/user.controller.ts"],
+    "relationships": [
+      {"from": "UserController.deleteUser", "to": "UserService.deleteUser"}
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "lookup-001",
+  "category": "lookup",
+  "repository": {"path": "fixtures/nestjs-sample", "revision": "fixture-v1"},
+  "question": "UserService.deleteUser는 어디에 선언되어 있는가?",
+  "expected": {
+    "symbols": ["UserService.deleteUser"],
+    "paths": ["src/user/user.service.ts"]
+  }
+}

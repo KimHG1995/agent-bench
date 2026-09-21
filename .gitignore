@@ -1,0 +1,5 @@
+/bin/
+/results/*.jsonl
+/results/*.md
+!/results/.gitkeep
+.DS_Store
