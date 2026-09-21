@@ -39,7 +39,7 @@ func (r Runner) runOne(task domain.Task, strategy, command string, run int) doma
 	ctx, cancel := context.WithTimeout(context.Background(), r.Timeout)
 	defer cancel()
 
-	request := domain.RunRequest{Strategy: strategy, Run: run, Task: task}
+	request := domain.RunRequest{Strategy: strategy, Run: run, Task: task.ForAgent()}
 	output, err := r.Agent.Run(ctx, command, request)
 	duration := time.Since(started)
 
@@ -62,5 +62,6 @@ func (r Runner) runOne(task domain.Task, strategy, command string, run int) doma
 	result.Unexpected = grade.Unexpected
 	result.Answer = output.Answer
 	result.Metrics = output.Metrics
+	result.Runtime = output.Runtime
 	return result
 }
