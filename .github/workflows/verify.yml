@@ -23,9 +23,11 @@ jobs:
       - run: go build -o bin/agent-bench ./cmd/agent-bench
       - run: go build -o bin/claude-adapter ./cmd/claude-adapter
       - run: go build -o bin/openai-adapter ./cmd/openai-adapter
+      - run: go build -o bin/codex-adapter ./cmd/codex-adapter
       - run: go build -o bin/graph-smoke ./cmd/graph-smoke
       - run: bash -n scripts/run-claude-comparison.sh
       - run: bash -n scripts/run-openai-comparison.sh
+      - run: bash -n scripts/run-codex-comparison.sh
       - run: bash -n scripts/prepare-loglens.sh
       - run: bash -n scripts/prepare-ts-graph-tools.sh
       - run: bash scripts/prepare-loglens.sh

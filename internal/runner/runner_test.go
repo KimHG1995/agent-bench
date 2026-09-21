@@ -9,6 +9,25 @@ import (
 
 type stubAgent struct{}
 
+type invalidAgent struct {
+	kind  string
+	calls *int
+}
+
+func (a invalidAgent) Run(_ context.Context, _ string, _ domain.RunRequest) (domain.AgentOutput, error) {
+	*a.calls++
+	return domain.AgentOutput{Status: domain.RunStatus{Execution: "completed", Measurement: "invalid", FailureKind: a.kind}}, nil
+}
+
+func TestInvalidMeasurementFailsAndFatalStops(t *testing.T) {
+	calls := 0
+	r := Runner{Agent: invalidAgent{kind: "quota", calls: &calls}, StopOnFatal: true}
+	rows := r.Run([]domain.Task{{ID: "a"}, {ID: "b"}}, "graph", "ignored", 3)
+	if calls != 1 || len(rows) != 1 || rows[0].Success || rows[0].Status.FailureKind != "quota" {
+		t.Fatalf("invalid/fatal not handled: calls=%d rows=%#v", calls, rows)
+	}
+}
+
 func (stubAgent) Run(_ context.Context, _ string, req domain.RunRequest) (domain.AgentOutput, error) {
 	return domain.AgentOutput{Evidence: domain.Evidence{}}, nil
 }

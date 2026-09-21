@@ -2,21 +2,40 @@ package codexadapter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/KimHG1995/agent-bench/internal/agent"
 	"github.com/KimHG1995/agent-bench/internal/domain"
 )
 
 // The external CLI is the only fake. Run executes the real process boundary,
 // snapshot creation, environment filtering, parser and integrity checks.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && os.Args[1] == "adapter-fixture" {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+		defer cancel()
+		var req domain.RunRequest
+		_ = json.NewDecoder(os.Stdin).Decode(&req)
+		bin, _ := os.Executable()
+		out, err := Run(ctx, req, Config{CodexBin: bin, Model: "test-model", Effort: "high", ServiceTier: "default", Timeout: 15 * time.Second, ArtifactRoot: os.Args[2]})
+		_ = json.NewEncoder(os.Stdout).Encode(out)
+		if err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Println("codex-cli 0.155.0-alpha.9.2")
 		os.Exit(0)
@@ -51,6 +70,7 @@ func TestMain(m *testing.M) {
 			os.Exit(9)
 		}
 		if strings.Contains(string(prompt), "scenario:timeout") {
+			fmt.Fprintf(os.Stderr, "child-pid=%d\n", os.Getpid())
 			time.Sleep(30 * time.Second)
 			os.Exit(0)
 		}
@@ -66,6 +86,37 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+func TestOuterHarnessTimeoutReapsNestedCodexProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix process groups")
+	}
+	repo, rev := fixtureRepo(t)
+	bin, _ := os.Executable()
+	artifacts := t.TempDir()
+	// Race-instrumented helper processes each wait at exit; allow preflight to
+	// finish before exercising cancellation of the actual nested exec process.
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	command := fmt.Sprintf("exec '%s' adapter-fixture '%s'", bin, artifacts)
+	out, err := (agent.CommandRunner{}).Run(ctx, command, domain.RunRequest{Strategy: "baseline", Task: domain.AgentTask{Question: "scenario:timeout", Repository: domain.RepositoryRef{Path: repo, Revision: rev}}})
+	if err == nil || out.Status.FailureKind != "timeout" || out.Runtime.ArtifactDir == "" {
+		t.Fatalf("nested partial result lost: %#v %v", out, err)
+	}
+	b, err := os.ReadFile(filepath.Join(out.Runtime.ArtifactDir, "stderr.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(string(b), "child-pid=")))
+	if err != nil {
+		t.Fatalf("child never launched: %s", b)
+	}
+	process, _ := os.FindProcess(pid)
+	if process.Signal(syscall.Signal(0)) == nil {
+		_ = process.Kill()
+		t.Fatal("nested Codex process survived outer timeout")
+	}
 }
 
 func fixtureRepo(t *testing.T) (string, string) {
@@ -95,7 +146,7 @@ func fixtureConfig(t *testing.T) Config {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Config{CodexBin: bin, Model: "test-model", Effort: "high", ServiceTier: "default", Timeout: 3 * time.Second, ArtifactRoot: filepath.Join(t.TempDir(), "artifacts with spaces")}
+	return Config{CodexBin: bin, Model: "test-model", Effort: "high", ServiceTier: "default", Timeout: 10 * time.Second, ArtifactRoot: filepath.Join(t.TempDir(), "artifacts with spaces")}
 }
 
 func TestRunUsesSafeCLIAndPreservesArtifacts(t *testing.T) {

@@ -43,9 +43,10 @@ func (t Task) ForAgent() AgentTask {
 }
 
 type RunRequest struct {
-	Strategy string    `json:"strategy"`
-	Run      int       `json:"run"`
-	Task     AgentTask `json:"task"`
+	Strategy  string    `json:"strategy"`
+	Run       int       `json:"run"`
+	Task      AgentTask `json:"task"`
+	TimeoutMS int64     `json:"timeoutMs,omitempty"`
 }
 
 type AgentRuntime struct {

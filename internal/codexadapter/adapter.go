@@ -23,6 +23,9 @@ func Run(parent context.Context, req domain.RunRequest, cfg Config) (out domain.
 	if err := cfg.validate(); err != nil {
 		return fail(out, "config", err)
 	}
+	if req.TimeoutMS > 0 && cfg.Timeout.Milliseconds()+2000 >= req.TimeoutMS {
+		return fail(out, "config", fmt.Errorf("harness timeout must exceed Codex timeout by more than two seconds"))
+	}
 	if req.Strategy != "baseline" && req.Strategy != "graph" {
 		return fail(out, "config", fmt.Errorf("unsupported strategy %q", req.Strategy))
 	}
@@ -115,9 +118,10 @@ func Run(parent context.Context, req domain.RunRequest, cfg Config) (out domain.
 	}
 	args := commonArgs(cfg)
 	out.Runtime.CommonConfigHash = hashJSON(struct {
-		Args            []string
-		RequireGraphUse bool
-	}{args, cfg.RequireGraphUse})
+		Args             []string
+		RequireGraphUse  bool
+		HarnessTimeoutMS int64
+	}{args, cfg.RequireGraphUse, req.TimeoutMS})
 	args = append(args, "-C", target, "--output-schema", filepath.Join(dir, "schema.json"), "-o", filepath.Join(dir, "answer.json"))
 	if req.Strategy == "graph" {
 		args = append(args, graph...)

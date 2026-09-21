@@ -3,4 +3,5 @@
 /results/*.md
 !/results/.gitkeep
 /targets/
+/results/codex-*/
 .DS_Store
