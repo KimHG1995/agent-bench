@@ -2,6 +2,9 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"github.com/KimHG1995/agent-bench/internal/domain"
@@ -13,15 +16,29 @@ type Agent interface {
 }
 
 type Runner struct {
-	Agent   Agent
-	Timeout time.Duration
+	Agent           Agent
+	Timeout         time.Duration
+	ExperimentID    string
+	HarnessRevision string
+	GraphRevision   string
 }
 
 func (r Runner) Run(tasks []domain.Task, strategy, command string, repeat int) []domain.RunResult {
-	return r.RunWithOffset(tasks, strategy, command, repeat, 0)
+	results, _ := r.RunWithOffsetEach(tasks, strategy, command, repeat, 0, nil)
+	return results
 }
 
 func (r Runner) RunWithOffset(tasks []domain.Task, strategy, command string, repeat, runOffset int) []domain.RunResult {
+	results, _ := r.RunWithOffsetEach(tasks, strategy, command, repeat, runOffset, nil)
+	return results
+}
+
+func (r Runner) RunWithOffsetEach(
+	tasks []domain.Task,
+	strategy, command string,
+	repeat, runOffset int,
+	onResult func(domain.RunResult) error,
+) ([]domain.RunResult, error) {
 	if repeat < 1 {
 		repeat = 1
 	}
@@ -36,10 +53,16 @@ func (r Runner) RunWithOffset(tasks []domain.Task, strategy, command string, rep
 	for _, task := range tasks {
 		for i := 1; i <= repeat; i++ {
 			run := runOffset + i
-			results = append(results, r.runOne(task, strategy, command, run))
+			result := r.runOne(task, strategy, command, run)
+			results = append(results, result)
+			if onResult != nil {
+				if err := onResult(result); err != nil {
+					return results, err
+				}
+			}
 		}
 	}
-	return results
+	return results, nil
 }
 
 func (r Runner) runOne(task domain.Task, strategy, command string, run int) domain.RunResult {
@@ -53,11 +76,26 @@ func (r Runner) runOne(task domain.Task, strategy, command string, run int) doma
 
 	result := domain.RunResult{
 		TaskID: task.ID, Category: task.Category, Strategy: strategy, Run: run,
-		Repository: task.Repository, StartedAt: started, DurationMS: duration.Milliseconds(),
-		Success: err == nil,
+		Repository: task.Repository,
+		Experiment: domain.ExperimentMeta{
+			ID:              r.ExperimentID,
+			HarnessRevision: r.HarnessRevision,
+			GraphRevision:   r.GraphRevision,
+			TaskHash:        taskHash(task),
+		},
+		StartedAt: started, DurationMS: duration.Milliseconds(),
+		Success: err == nil && output.Error == "",
+		Answer: output.Answer, Metrics: output.Metrics, Runtime: output.Runtime,
 	}
 	if err != nil {
 		result.Error = err.Error()
+		if output.Error != "" {
+			result.Error = output.Error + ": " + result.Error
+		}
+		return result
+	}
+	if output.Error != "" {
+		result.Error = output.Error
 		return result
 	}
 
@@ -68,8 +106,11 @@ func (r Runner) runOne(task domain.Task, strategy, command string, run int) doma
 	result.Matched = grade.Matched
 	result.Missing = grade.Missing
 	result.Unexpected = grade.Unexpected
-	result.Answer = output.Answer
-	result.Metrics = output.Metrics
-	result.Runtime = output.Runtime
 	return result
+}
+
+func taskHash(task domain.Task) string {
+	b, _ := json.Marshal(task)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }

@@ -9,21 +9,60 @@ import (
 	"github.com/KimHG1995/agent-bench/internal/domain"
 )
 
+type Writer struct {
+	file *os.File
+	buf  *bufio.Writer
+	enc  *json.Encoder
+}
+
+func NewWriter(path string, overwrite bool) (*Writer, error) {
+	flags := os.O_CREATE | os.O_WRONLY
+	if overwrite {
+		flags |= os.O_TRUNC
+	} else {
+		flags |= os.O_EXCL
+	}
+	f, err := os.OpenFile(path, flags, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	buf := bufio.NewWriter(f)
+	return &Writer{file: f, buf: buf, enc: json.NewEncoder(buf)}, nil
+}
+
+func (w *Writer) Write(result domain.RunResult) error {
+	if err := w.enc.Encode(result); err != nil {
+		return err
+	}
+	if err := w.buf.Flush(); err != nil {
+		return err
+	}
+	return w.file.Sync()
+}
+
+func (w *Writer) Close() error {
+	if w == nil || w.file == nil {
+		return nil
+	}
+	if err := w.buf.Flush(); err != nil {
+		_ = w.file.Close()
+		return err
+	}
+	return w.file.Close()
+}
+
 func WriteJSONL(path string, results []domain.RunResult) error {
-	f, err := os.Create(path)
+	w, err := NewWriter(path, true)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	defer w.Flush()
-	enc := json.NewEncoder(w)
 	for _, result := range results {
-		if err := enc.Encode(result); err != nil {
+		if err := w.Write(result); err != nil {
+			_ = w.Close()
 			return err
 		}
 	}
-	return nil
+	return w.Close()
 }
 
 func ReadJSONL(path string) ([]domain.RunResult, error) {

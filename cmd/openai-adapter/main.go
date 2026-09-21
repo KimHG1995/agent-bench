@@ -19,6 +19,10 @@ func main() {
 
 	out, err := openaiadapter.Run(context.Background(), req, openaiadapter.ConfigFromEnv())
 	if err != nil {
+		out.Error = err.Error()
+		if encodeErr := json.NewEncoder(os.Stdout).Encode(out); encodeErr != nil {
+			fmt.Fprintln(os.Stderr, encodeErr)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

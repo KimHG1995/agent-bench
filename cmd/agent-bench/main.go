@@ -50,6 +50,11 @@ func runCommand(args []string) error {
 	runOffset := fs.Int("run-offset", 0, "offset added to run numbers, useful for split experiment files")
 	timeout := fs.Duration("timeout", 120*time.Second, "timeout per run")
 	out := fs.String("out", "results/results.jsonl", "output JSONL path")
+	overwrite := fs.Bool("overwrite", false, "allow replacing an existing result file")
+	failOnError := fs.Bool("fail-on-error", false, "return a non-zero exit code after persisting all runs if any run failed")
+	experimentID := fs.String("experiment-id", os.Getenv("AGENT_BENCH_EXPERIMENT_ID"), "experiment identifier used for paired comparison")
+	harnessRevision := fs.String("harness-revision", os.Getenv("AGENT_BENCH_HARNESS_REVISION"), "agent-bench revision")
+	graphRevision := fs.String("graph-revision", os.Getenv("AGENT_BENCH_GRAPH_REVISION"), "graph tool revision")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -71,13 +76,25 @@ func runCommand(args []string) error {
 		return fmt.Errorf("no benchmark tasks found in %s", *tasksDir)
 	}
 
-	r := runner.Runner{Agent: agent.CommandRunner{}, Timeout: *timeout}
-	results := r.RunWithOffset(tasks, *strategy, *command, *repeat, *runOffset)
 	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
 		return err
 	}
-	if err := resultio.WriteJSONL(*out, results); err != nil {
-		return err
+	writer, err := resultio.NewWriter(*out, *overwrite)
+	if err != nil {
+		return fmt.Errorf("open result file: %w", err)
+	}
+
+	r := runner.Runner{
+		Agent: agent.CommandRunner{}, Timeout: *timeout,
+		ExperimentID: *experimentID, HarnessRevision: *harnessRevision, GraphRevision: *graphRevision,
+	}
+	results, runErr := r.RunWithOffsetEach(tasks, *strategy, *command, *repeat, *runOffset, writer.Write)
+	closeErr := writer.Close()
+	if runErr != nil {
+		return runErr
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 
 	succeeded := 0
@@ -87,6 +104,9 @@ func runCommand(args []string) error {
 		}
 	}
 	fmt.Printf("wrote %d runs to %s (%d succeeded)\n", len(results), *out, succeeded)
+	if *failOnError && succeeded != len(results) {
+		return fmt.Errorf("%d of %d runs failed", len(results)-succeeded, len(results))
+	}
 	return nil
 }
 
