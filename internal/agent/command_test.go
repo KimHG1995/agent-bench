@@ -13,7 +13,7 @@ func TestCommandRunner(t *testing.T) {
 	defer cancel()
 
 	command := `cat >/dev/null; printf '%s' '{"answer":"ok","evidence":{"symbols":["A"]},"metrics":{"toolCalls":1}}'`
-	out, err := (CommandRunner{}).Run(ctx, command, domain.RunRequest{Task: domain.Task{ID: "t"}})
+	out, err := (CommandRunner{}).Run(ctx, command, domain.RunRequest{Task: domain.AgentTask{ID: "t"}})
 	if err != nil {
 		t.Fatal(err)
 	}
