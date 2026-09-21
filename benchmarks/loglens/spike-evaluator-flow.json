@@ -1,0 +1,17 @@
+{
+  "id": "loglens-spike-evaluator-flow",
+  "category": "flow",
+  "repository": {"path": "targets/loglens", "revision": "985d81ee1fb97570ae1f6da39775c7b0dec38db2"},
+  "question": "Which service method performs one spike-detection pass and which pure function does it call to decide whether a count is a spike?",
+  "expected": {
+    "symbols": ["SpikeDetectionService.run", "SpikeDetectionService.buildAlert", "evaluateSpike"],
+    "paths": [
+      "src/modules/alerts/services/spike-detection.service.ts",
+      "src/modules/alerts/domain/spike-evaluator.ts"
+    ],
+    "relationships": [
+      {"from": "SpikeDetectionService.run", "to": "SpikeDetectionService.buildAlert"},
+      {"from": "SpikeDetectionService.buildAlert", "to": "evaluateSpike"}
+    ]
+  }
+}

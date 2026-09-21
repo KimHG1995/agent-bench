@@ -1,0 +1,19 @@
+{
+  "id": "loglens-ingest-sink",
+  "category": "impact",
+  "repository": {"path": "targets/loglens", "revision": "985d81ee1fb97570ae1f6da39775c7b0dec38db2"},
+  "question": "Identify the abstraction called by IngestController.ingest and the concrete provider bound to that abstraction in the NestJS module.",
+  "expected": {
+    "symbols": ["IngestController.ingest", "LogSink.write", "ClickHouseBufferedLogSink", "LOG_SINK"],
+    "paths": [
+      "src/modules/ingest/controllers/ingest.controller.ts",
+      "src/modules/ingest/interfaces/log-sink.interface.ts",
+      "src/modules/ingest/services/clickhouse-buffered-log.sink.ts",
+      "src/modules/ingest/ingest.module.ts"
+    ],
+    "relationships": [
+      {"from": "IngestController.ingest", "to": "LogSink.write"},
+      {"from": "LOG_SINK", "to": "ClickHouseBufferedLogSink"}
+    ]
+  }
+}
