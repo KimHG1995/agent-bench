@@ -2,35 +2,55 @@
 
 [한국어](README.md)
 
-A reproducible Go benchmark harness for comparing how AI coding agents understand codebases under controlled conditions.
+A reproducible benchmark harness written in Go for comparing how the same AI coding agent understands a codebase under controlled context conditions.
 
-The harness is model and vendor agnostic. It runs external agents through a JSON stdin/stdout protocol and records deterministic accuracy, tool calls, token usage, and wall-clock latency.
+Current comparison:
 
-The first intended comparison is:
+- `baseline`: Claude Code with Read, Grep, and Glob
+- `graph`: the same model and built-in tools plus one TypeScript Code Graph MCP tool
 
-- `baseline`: file search and file reading based context
-- `graph`: the same agent with TypeScript Code Graph MCP access
+Agent Bench records deterministic evidence accuracy, tool calls, token and cache usage, estimated cost, latency, and failures.
 
-> The included `mock-agent` only verifies the harness end to end. Its numbers are not baseline-vs-graph benchmark results.
+Expected answers remain inside the harness and are never sent to the evaluated agent subprocess.
 
-## SDD
-
-- [MVP specification](docs/001-mvp/spec.md)
-- [MVP design](docs/001-mvp/design.md)
-- [Implementation tasks](docs/001-mvp/tasks.md)
-
-## Verify
+## Build
 
 ```bash
 go test ./...
+go vet ./...
+go build -o bin/agent-bench ./cmd/agent-bench
+go build -o bin/claude-adapter ./cmd/claude-adapter
 ```
 
-## End-to-end harness check
+## Baseline
 
 ```bash
-go run ./cmd/agent-bench run -tasks benchmarks -strategy baseline -command 'go run ./examples/mock-agent' -repeat 2 -out results/baseline.jsonl
-go run ./cmd/agent-bench run -tasks benchmarks -strategy graph -command 'go run ./examples/mock-agent' -repeat 2 -out results/graph.jsonl
-go run ./cmd/agent-bench report -inputs results/baseline.jsonl,results/graph.jsonl -out results/report.md
+export AGENT_BENCH_CLAUDE_MODEL=claude-sonnet-5
+export AGENT_BENCH_CLAUDE_EFFORT=medium
+
+./bin/agent-bench run \
+  -tasks benchmarks \
+  -strategy baseline \
+  -command './bin/claude-adapter' \
+  -repeat 3 \
+  -timeout 5m \
+  -out results/baseline.jsonl
 ```
 
-See the Korean README and SDD documents for the full protocol, grading model, and roadmap.
+## Graph
+
+```bash
+export AGENT_BENCH_TS_GRAPH_HOST=../ts-graph-tools
+
+./bin/agent-bench run \
+  -tasks benchmarks \
+  -strategy graph \
+  -command './bin/claude-adapter' \
+  -repeat 3 \
+  -timeout 5m \
+  -out results/graph.jsonl
+```
+
+No token-saving or accuracy-improvement claim is made until real repeated runs are recorded.
+
+See [docs/002-claude-adapter](docs/002-claude-adapter/spec.md) for the isolation and measurement contract.
