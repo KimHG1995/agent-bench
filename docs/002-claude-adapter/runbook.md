@@ -29,8 +29,7 @@ Claude Code CLI 로그인도 완료되어 있어야 한다.
 ## 실행
 
 ```bash
-chmod +x scripts/run-claude-comparison.sh
-AGENT_BENCH_REPEAT=5 ./scripts/run-claude-comparison.sh
+AGENT_BENCH_REPEAT=5 bash scripts/run-claude-comparison.sh
 ```
 
 선택 환경 변수:
