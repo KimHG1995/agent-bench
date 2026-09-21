@@ -49,10 +49,13 @@ type RunRequest struct {
 }
 
 type AgentRuntime struct {
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Adapter  string `json:"adapter,omitempty"`
-	Effort   string `json:"effort,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	RequestedModel string `json:"requestedModel,omitempty"`
+	Model          string `json:"model,omitempty"`
+	Adapter        string `json:"adapter,omitempty"`
+	Effort         string `json:"effort,omitempty"`
+	Endpoint       string `json:"endpoint,omitempty"`
+	MaxTurns       int    `json:"maxTurns,omitempty"`
 }
 
 type AgentMetrics struct {
@@ -63,13 +66,15 @@ type AgentMetrics struct {
 	CacheCreationInputTokens *int64   `json:"cacheCreationInputTokens,omitempty"`
 	CacheReadInputTokens     *int64   `json:"cacheReadInputTokens,omitempty"`
 	CostUSD                  *float64 `json:"costUsd,omitempty"`
+	Partial                  bool     `json:"partial,omitempty"`
 }
 
 type AgentOutput struct {
-	Answer   string       `json:"answer"`
+	Answer   string       `json:"answer,omitempty"`
 	Evidence Evidence     `json:"evidence"`
 	Metrics  AgentMetrics `json:"metrics"`
 	Runtime  AgentRuntime `json:"runtime"`
+	Error    string       `json:"error,omitempty"`
 }
 
 type Grade struct {
@@ -81,23 +86,31 @@ type Grade struct {
 	Unexpected []string `json:"unexpected"`
 }
 
+type ExperimentMeta struct {
+	ID              string `json:"id,omitempty"`
+	HarnessRevision string `json:"harnessRevision,omitempty"`
+	GraphRevision   string `json:"graphRevision,omitempty"`
+	TaskHash        string `json:"taskHash"`
+}
+
 type RunResult struct {
-	TaskID     string        `json:"taskId"`
-	Category   string        `json:"category"`
-	Strategy   string        `json:"strategy"`
-	Run        int           `json:"run"`
-	Repository RepositoryRef `json:"repository"`
-	StartedAt  time.Time     `json:"startedAt"`
-	DurationMS int64         `json:"durationMs"`
-	Accuracy   float64       `json:"accuracy"`
-	Precision  float64       `json:"precision"`
-	Recall     float64       `json:"recall"`
-	Matched    []string      `json:"matched"`
-	Missing    []string      `json:"missing"`
-	Unexpected []string      `json:"unexpected"`
-	Success    bool          `json:"success"`
-	Error      string        `json:"error,omitempty"`
-	Answer     string        `json:"answer,omitempty"`
-	Metrics    AgentMetrics  `json:"metrics"`
-	Runtime    AgentRuntime  `json:"runtime"`
+	TaskID     string         `json:"taskId"`
+	Category   string         `json:"category"`
+	Strategy   string         `json:"strategy"`
+	Run        int            `json:"run"`
+	Repository RepositoryRef  `json:"repository"`
+	Experiment ExperimentMeta `json:"experiment"`
+	StartedAt  time.Time      `json:"startedAt"`
+	DurationMS int64          `json:"durationMs"`
+	Accuracy   float64        `json:"accuracy"`
+	Precision  float64        `json:"precision"`
+	Recall     float64        `json:"recall"`
+	Matched    []string       `json:"matched"`
+	Missing    []string       `json:"missing"`
+	Unexpected []string       `json:"unexpected"`
+	Success    bool           `json:"success"`
+	Error      string         `json:"error,omitempty"`
+	Answer     string         `json:"answer,omitempty"`
+	Metrics    AgentMetrics   `json:"metrics"`
+	Runtime    AgentRuntime   `json:"runtime"`
 }
