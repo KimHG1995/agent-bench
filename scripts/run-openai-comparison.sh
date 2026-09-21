@@ -18,7 +18,9 @@ graph_inputs=()
 failed=0
 
 run_strategy() {
-  local strategy="$1" run="$2" out="$OUT_DIR/$strategy-$run.jsonl"
+  local strategy="$1"
+  local run="$2"
+  local out="$OUT_DIR/$strategy-$run.jsonl"
   echo "==> $strategy run $run"
   if ! "$AGENT_BENCH_BIN" run       -tasks "$TASKS"       -strategy "$strategy"       -command "$ADAPTER_BIN"       -repeat 1       -run-offset "$((run - 1))"       -timeout "$TIMEOUT"       -fail-on-error       -out "$out"; then
     failed=1
