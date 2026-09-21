@@ -1,0 +1,20 @@
+# Claude Code Adapter Tasks
+
+- [x] expected 정답을 RunRequest에서 제거
+- [x] Claude Code adapter entrypoint 구현
+- [x] baseline isolation 구현
+- [x] graph MCP config 생성 구현
+- [x] structured output schema 적용
+- [x] stream-json parser 구현
+- [x] tool call 중복 제거
+- [x] token/cache usage 수집
+- [x] estimated cost 수집
+- [x] baseline MCP contamination 방어
+- [x] graph unexpected MCP 방어
+- [x] parser unit test
+- [x] expected leakage unit test
+- [x] local go test ./... 검증
+- [x] local go vet ./... 검증
+- [ ] 실제 Claude baseline 반복 실행
+- [ ] 실제 graph 반복 실행
+- [ ] 실측 결과 Markdown 생성
