@@ -15,6 +15,10 @@
 - [x] expected leakage unit test
 - [x] local go test ./... 검증
 - [x] local go vet ./... 검증
+- [x] GitHub Actions go test / go vet 통과
+- [x] report median / p95 추가
+- [x] baseline↔graph paired delta 추가
+- [x] task별 accuracy 비교 추가
 - [ ] 실제 Claude baseline 반복 실행
 - [ ] 실제 graph 반복 실행
 - [ ] 실측 결과 Markdown 생성
