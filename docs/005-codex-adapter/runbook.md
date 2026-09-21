@@ -1,47 +1,83 @@
-# Codex 실측 재현 안내
+# Codex adapter 실행 안내
 
-현재 사용 가능한 것은 [일회성 실측 스크립트](../codex-smoke/run_smoke.py)다. `agent-bench` 정식 Codex adapter나 비교 명령은 아직 구현되지 않았다. 이 스크립트는 이번 컴퓨터의 절대경로와 pinned commit에 맞춰져 있다.
+기존 ChatGPT 로그인을 사용하는 로컬 CLI benchmark다. API key는 필요하지 않으며 사용자 Codex 사용량을 사용한다.
 
 ## 준비
 
-- Codex CLI: `/Applications/ChatGPT.app/Contents/Resources/codex`, 실측 버전 `0.155.0-alpha.9.2`.
-- `codex login status`가 `Logged in using ChatGPT`인지 확인한다.
-- `loglens` commit `985d81ee1fb97570ae1f6da39775c7b0dec38db2`와 `ts-graph-tools` commit `6cc701bde596a955cb95824f67e896e13c10fff2`가 깨끗한 작업 트리로 있어야 한다.
-- Graph host는 `@ttsc/graph 0.19.3` 및 플랫폼별 binary가 설치되어 있어야 한다. 별도의 target dependency 설치는 이번 smoke에서 하지 않았다.
-- 저장된 API key가 없어도 실행 가능하나, 사용자 Codex 계정의 사용량이 필요하다.
-
-## 새로운 실측
-
-다음 명령은 **실제 모델 호출을 추가로 발생시킨다**. 기존 run 번호를 재사용하면 디렉터리 생성 단계에서 실패하므로 raw 결과를 덮어쓰지 않는다. 새 번호를 사용한다.
-
 ```bash
-python3 /Users/hgkim/Documents/PERSONAL/reviews/agent-bench-20260921/codex-smoke/run_smoke.py baseline --run 3
-python3 /Users/hgkim/Documents/PERSONAL/reviews/agent-bench-20260921/codex-smoke/run_smoke.py graph --run 3
+codex login status
+
+go build -o bin/agent-bench ./cmd/agent-bench
+go build -o bin/codex-adapter ./cmd/codex-adapter
+bash scripts/prepare-loglens.sh
+bash scripts/prepare-ts-graph-tools.sh
 ```
 
-짝수 반복은 graph → baseline 순서로 실행한다. 이번 실행에서는 run 1의 Graph 승인 설정 실패를 남긴 뒤, run 2를 graph → baseline 순서로 완료했다. `run_smoke.py`의 현재 버전에는 조회 도구 승인 설정이 반영되어 있어 run 1의 실패 설정은 재현하지 않는다. 정확한 당시 argv는 각 `metadata.json`에 남아 있다.
+로그인 상태가 `Logged in using ChatGPT`여야 한다. 로그인 자체는 필요할 때 사용자가 별도로 `codex login`으로 수행한다. macOS 앱 번들 CLI를 사용하는 경우 `AGENT_BENCH_CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex`를 지정할 수 있다.
 
-스크립트는 300초 timeout을 적용한다. 모델 선택은 실측 당시 사용자 설정에서 가져온 `gpt-6-astra`, effort `xhigh`, tier `default`로 고정되어 있다. 모델이나 effort를 변경하면 새 실험으로 구분한다.
+## 비교 실행
 
-## 결과 확인
+```bash
+export AGENT_BENCH_CODEX_MODEL=gpt-6-astra
+export AGENT_BENCH_CODEX_EFFORT=xhigh
+export AGENT_BENCH_TS_GRAPH_HOST=targets/ts-graph-tools
+export AGENT_BENCH_OUT_DIR=results/codex-example
 
-각 run 디렉터리에 `prompt.txt`, `schema.json`, `metadata.json`, `events.jsonl`, `stderr.log`, `answer.json`이 생성된다. credential 원문은 artifact에 저장하지 않는다. 실패한 실행도 삭제하지 않는다.
+AGENT_BENCH_REPEAT=3 bash scripts/run-codex-comparison.sh
+```
 
-`metadata.exitCode=0`만 확인하지 않는다. 최종 schema가 유효한지, `turn.completed`가 있는지, usage가 온전한지, Graph 연결 smoke에서 실제 `mcp_tool_call.status=completed`와 Graph 근거 결과가 있는지 확인한다. Graph 승인 실패 후 shell로 작성된 답변은 정상 Graph smoke가 아니다.
+예시 모델은 실측에 사용한 요청값이다. 계정에서 사용할 모델을 명시해야 하며 자동 모델 선택은 하지 않는다. 기본 과제는 loglens 3개, 기본 반복은 3회이므로 최대 18번의 agent 실행이다. 각 agent 실행 안에서 모델 요청이 여러 번 발생할 수 있다.
 
-채점은 모델 호출 없이 기존 Go grader를 사용했다. helper 원본은 [grade-main.go](../codex-smoke/grade-main.go)에 보존했다. Go `internal` import 규칙 때문에 agent-bench checkout 안의 임시 helper 경로에 놓고 실행해야 한다. 기존 원본 채점 결과는 [grades.json](../codex-smoke/grades.json)에 있다.
+출력 디렉터리는 새 경로여야 한다. 기존 디렉터리를 재사용하면 호출 전에 실패한다. 홀수 반복은 baseline → graph, 짝수는 graph → baseline이다. auth/quota 오류에서는 해당 결과를 저장한 뒤 남은 실행을 중단한다. 재시도나 다른 provider fallback은 하지 않는다.
 
-`summarize.py`는 이미 존재하는 grades와 events만 읽으며 모델을 호출하지 않는다. 새 실행을 추가한 경우 먼저 새 answer에 대해 Go grader와 schema validator를 다시 실행해 grades를 갱신해야 한다.
+## 설정
 
-## 실패 대응
-
-| 증상 | 처리 |
+| 환경변수 | 기본값 / 역할 |
 | --- | --- |
-| ChatGPT 로그인 없음/만료 | 로그인 상태를 복구한 뒤 새 run; API key fallback 금지 |
-| 계정 quota 소진 | 해당 실패 보존, 명시된 reset 정보 확인; 자동 연속 재시도 금지 |
-| MCP 승인 필요 + approval never | 고정된 로컬 조회 도구의 per-tool 설정 확인 |
-| MCP initialize 실패 | graph/node binary, cwd, dependency version 점검 |
-| 전역 skill 경고 | 실행 성공과 분리해서 기록; 완전 격리라고 주장하지 않음 |
-| timeout/final JSON 누락 | 실패·partial 기록; 기존 결과를 정상 값으로 보충하지 않음 |
+| AGENT_BENCH_CODEX_BIN | codex 실행 파일 |
+| AGENT_BENCH_CODEX_MODEL | 필수, 요청 모델 |
+| AGENT_BENCH_CODEX_EFFORT | medium |
+| AGENT_BENCH_CODEX_SERVICE_TIER | default |
+| AGENT_BENCH_CODEX_TIMEOUT | 5m, adapter 전체 시간 |
+| AGENT_BENCH_TIMEOUT | 비교 script에서 6m, harness 시간 |
+| AGENT_BENCH_CODEX_REQUIRE_GRAPH_USE | false; true면 연결 smoke에서 fact 호출 필수 |
+| AGENT_BENCH_TS_GRAPH_HOST | script에서 targets/ts-graph-tools |
+| AGENT_BENCH_NODE_BIN | node |
+| AGENT_BENCH_TASKS | script에서 benchmarks/loglens |
+| AGENT_BENCH_REPEAT | script에서 3 |
+| AGENT_BENCH_OUT_DIR | script에서 timestamp/PID가 포함된 새 결과 경로 |
+| AGENT_BENCH_CODEX_ARTIFACTS | adapter 직접 실행 시 results/codex-artifacts; script는 OUT_DIR/raw로 지정 |
 
-공식 설명: [ChatGPT 인증](https://developers.openai.com/codex/auth/), [비대화형 실행](https://developers.openai.com/codex/noninteractive/), [MCP 설정](https://developers.openai.com/codex/mcp/).
+harness timeout은 adapter timeout보다 2초 넘게 길어야 한다. 실제 적용하지 않는 max-turns 값을 기록하지 않는다.
+
+## 결과
+
+`OUT_DIR`에 전략/반복별 JSONL과 `report.md`가 생긴다. `raw/`의 실행별 디렉터리에는 prompt, schema, events, stderr, final answer, manifest 및 target snapshot을 보존한다. 이 디렉터리는 소스 코드 내용을 포함할 수 있으므로 원문 공개 전 검토한다. 저장소에는 credential과 raw 실행 디렉터리를 커밋하지 않는다.
+
+report는 evidence F1, required recall, precision, 토큰·캐시, Graph 사용 수, 비교 가능한 pair 수와 제외 이유를 표시한다. `requested_only`는 요청 모델만 확인했다는 뜻이다. `costUsd`가 없으면 비용 미관측이지 무료 사용량 무제한이 아니다.
+
+## 실패 처리
+
+| failureKind | 의미와 다음 행동 |
+| --- | --- |
+| auth / quota | 계정 문제; 상태를 확인한 뒤 새 실험 경로로 실행 |
+| config | CLI/모델/시간 예산/호환 옵션 확인 |
+| target | SHA 불일치, dirty target, 지원하지 않는 archive 항목 확인 |
+| target_mutated | 실행 중 target 변경; 원문을 확인하고 해당 비교 폐기 |
+| graph_unavailable | MCP 기동·승인·도구 실행 오류; stderr/events 확인 |
+| graph_not_used | 연결 smoke에서 실제 Graph fact 조회가 없었음 |
+| protocol / output_schema | stream 또는 final 응답 계약 불일치; fixture로 회귀 재현 |
+| timeout | deadline 종료; partial 결과 보존 |
+| process / provider / artifact | exit 상태·서비스 오류·로컬 파일 저장 실패 확인 |
+
+`agent-bench run -stop-on-fatal`은 auth/quota 결과를 저장하고 exit 3을 반환한다. 비교 script는 보고서 생성까지 시도한 뒤 실패 시 exit 1을 반환한다. exit 0만으로 Graph 호출이 성공했다고 판단하지 않는다.
+
+## 검증
+
+```bash
+go test -race ./...
+go vet ./...
+bash -n scripts/run-codex-comparison.sh
+```
+
+CI는 외부 모델 호출 없이 실제 subprocess fixture와 캡처된 JSONL을 사용한다. 개인 ChatGPT 인증 파일을 GitHub Actions secret으로 복사하는 방식은 제공하지 않는다.
