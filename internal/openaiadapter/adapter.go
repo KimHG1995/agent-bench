@@ -14,14 +14,20 @@ import (
 	"time"
 
 	"github.com/KimHG1995/agent-bench/internal/domain"
+	"github.com/KimHG1995/agent-bench/internal/graphhost"
+	"github.com/KimHG1995/agent-bench/internal/mcpstdio"
 )
 
+const graphToolName = "inspect_typescript_graph"
+
 type Config struct {
-	BaseURL  string
-	APIKey   string
-	Model    string
-	MaxTurns int
-	Client   *http.Client
+	BaseURL   string
+	APIKey    string
+	Model     string
+	MaxTurns  int
+	Client    *http.Client
+	GraphHost string
+	NodeBin   string
 }
 
 func ConfigFromEnv() Config {
@@ -41,17 +47,19 @@ func ConfigFromEnv() Config {
 		}
 	}
 	return Config{
-		BaseURL:  strings.TrimRight(baseURL, "/"),
-		APIKey:   key,
-		Model:    strings.TrimSpace(os.Getenv("AGENT_BENCH_OPENAI_MODEL")),
-		MaxTurns: maxTurns,
-		Client:   &http.Client{Timeout: 120 * time.Second},
+		BaseURL:   strings.TrimRight(baseURL, "/"),
+		APIKey:    key,
+		Model:     strings.TrimSpace(os.Getenv("AGENT_BENCH_OPENAI_MODEL")),
+		MaxTurns:  maxTurns,
+		Client:    &http.Client{Timeout: 120 * time.Second},
+		GraphHost: strings.TrimSpace(os.Getenv("AGENT_BENCH_TS_GRAPH_HOST")),
+		NodeBin:   envOr("AGENT_BENCH_NODE_BIN", "node"),
 	}
 }
 
 func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOutput, error) {
-	if req.Strategy != "baseline" {
-		return domain.AgentOutput{}, fmt.Errorf("openai-compatible adapter currently supports baseline only")
+	if req.Strategy != "baseline" && req.Strategy != "graph" {
+		return domain.AgentOutput{}, fmt.Errorf("unsupported strategy %q", req.Strategy)
 	}
 	if cfg.APIKey == "" {
 		return domain.AgentOutput{}, fmt.Errorf("missing API key: set AGENT_BENCH_OPENAI_API_KEY, OPENAI_API_KEY, or ORCAROUTER_API_KEY")
@@ -74,15 +82,52 @@ func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOu
 		return domain.AgentOutput{}, fmt.Errorf("repository %s: %w", repo, err)
 	}
 
+	availableTools := toolSpecs()
+	var graphClient *mcpstdio.Client
+	if req.Strategy == "graph" {
+		process, err := graphhost.Process(cfg.GraphHost, repo, cfg.NodeBin)
+		if err != nil {
+			return domain.AgentOutput{}, err
+		}
+		graphClient, err = mcpstdio.Start(ctx, process)
+		if err != nil {
+			return domain.AgentOutput{}, err
+		}
+		defer graphClient.Close()
+
+		mcpTools, err := graphClient.ListTools()
+		if err != nil {
+			return domain.AgentOutput{}, fmt.Errorf("list graph tools: %w", err)
+		}
+		found := false
+		for _, t := range mcpTools {
+			if t.Name != graphToolName {
+				continue
+			}
+			found = true
+			availableTools = append(availableTools, tool{
+				Type: "function",
+				Function: functionSpec{
+					Name:        t.Name,
+					Description: t.Description,
+					Parameters:  t.InputSchema,
+				},
+			})
+		}
+		if !found {
+			return domain.AgentOutput{}, fmt.Errorf("%s not advertised by graph MCP", graphToolName)
+		}
+	}
+
 	messages := []message{
-		{Role: "system", Content: systemPrompt()},
+		{Role: "system", Content: systemPrompt(req.Strategy)},
 		{Role: "user", Content: req.Task.Question},
 	}
 
 	var promptTokens, completionTokens int64
-	var toolCalls int64
+	var toolCalls, graphToolCalls int64
 	for turn := 0; turn < cfg.MaxTurns; turn++ {
-		resp, err := chat(ctx, cfg, messages)
+		resp, err := chat(ctx, cfg, messages, availableTools)
 		if err != nil {
 			return domain.AgentOutput{}, err
 		}
@@ -102,9 +147,10 @@ func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOu
 				Answer:   result.Answer,
 				Evidence: result.Evidence,
 				Metrics: domain.AgentMetrics{
-					ToolCalls:   &toolCalls,
-					InputTokens: &promptTokens,
-					OutputTokens:&completionTokens,
+					ToolCalls:      &toolCalls,
+					GraphToolCalls: &graphToolCalls,
+					InputTokens:    &promptTokens,
+					OutputTokens:   &completionTokens,
 				},
 				Runtime: domain.AgentRuntime{
 					Provider: providerName(cfg.BaseURL),
@@ -117,9 +163,31 @@ func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOu
 		messages = append(messages, msg)
 		for _, tc := range msg.ToolCalls {
 			toolCalls++
-			result, err := runTool(repo, tc)
-			if err != nil {
-				result = map[string]any{"error": err.Error()}
+			var result any
+			if tc.Function.Name == graphToolName {
+				if req.Strategy != "graph" || graphClient == nil {
+					result = map[string]any{"error": "graph tool unavailable in baseline strategy"}
+				} else {
+					graphToolCalls++
+					var args map[string]any
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+						result = map[string]any{"error": "invalid graph arguments: " + err.Error()}
+					} else {
+						call, err := graphClient.CallTool(graphToolName, args)
+						if err != nil {
+							result = map[string]any{"error": err.Error()}
+						} else {
+							result = call.Value()
+						}
+					}
+				}
+			} else {
+				localResult, err := runTool(repo, tc)
+				if err != nil {
+					result = map[string]any{"error": err.Error()}
+				} else {
+					result = localResult
+				}
 			}
 			b, _ := json.Marshal(result)
 			messages = append(messages, message{
@@ -132,9 +200,14 @@ func Run(ctx context.Context, req domain.RunRequest, cfg Config) (domain.AgentOu
 	return domain.AgentOutput{}, fmt.Errorf("max turns exceeded")
 }
 
-func systemPrompt() string {
+func systemPrompt(strategy string) string {
+	graph := ""
+	if strategy == "graph" {
+		graph = `
+You also have inspect_typescript_graph. Prefer it for TypeScript symbol lookup, callers/callees, flow, impact, implementers, and architecture. Treat compiler-resolved graph facts as trusted evidence. Use file tools only when the graph does not carry the needed source-body evidence.`
+	}
 	return `You are a read-only coding agent in a benchmark.
-Use tools to inspect the repository. Do not guess.
+Use tools to inspect the repository. Do not guess.` + graph + `
 When you have enough evidence, respond with JSON only and no markdown:
 {"answer":"...","evidence":{"symbols":[],"paths":[],"relationships":[{"from":"...","to":"..."}]}}
 Paths must be relative to the repository root. Include only evidence relevant to the question.`
@@ -184,11 +257,11 @@ type chatResponse struct {
 	} `json:"usage"`
 }
 
-func chat(ctx context.Context, cfg Config, messages []message) (chatResponse, error) {
+func chat(ctx context.Context, cfg Config, messages []message, tools []tool) (chatResponse, error) {
 	body, err := json.Marshal(chatRequest{
 		Model: cfg.Model,
 		Messages: messages,
-		Tools: toolSpecs(),
+		Tools: tools,
 	})
 	if err != nil {
 		return chatResponse{}, err
