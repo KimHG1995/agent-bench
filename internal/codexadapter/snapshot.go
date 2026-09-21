@@ -104,6 +104,18 @@ func prepareTarget(ctx context.Context, source, revision, dest string) error {
 	if len(b) > 0 {
 		return fmt.Errorf("target has uncommitted/untracked changes")
 	}
+	// git archive turns gitlinks into ordinary empty directories. Reject them
+	// from the pinned tree before extraction can silently omit their contents.
+	b, err = git("ls-tree", "-r", "-z", revision)
+	if err != nil {
+		return fmt.Errorf("inspect target tree: %w", err)
+	}
+	for _, entry := range strings.Split(string(b), "\x00") {
+		metadata, path, ok := strings.Cut(entry, "\t")
+		if ok && strings.HasPrefix(metadata, "160000 ") {
+			return fmt.Errorf("target submodule is not supported: %s", path)
+		}
+	}
 	if err = os.MkdirAll(dest, 0700); err != nil {
 		return err
 	}

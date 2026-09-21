@@ -53,6 +53,27 @@ func TestParseStreamRejectsGraphDenialEvenAfterCompletedTurn(t *testing.T) {
 	}
 }
 
+func TestParseStreamFatalAccountErrorSurvivesEarlierFailures(t *testing.T) {
+	prefixes := map[string]string{
+		"graph":    `{"type":"item.completed","item":{"id":"g","type":"mcp_tool_call","server":"ts_graph","tool":"inspect_typescript_graph","status":"failed","error":{"message":"tool unavailable"}}}` + "\n",
+		"provider": `{"type":"error","message":"temporary provider outage"}` + "\n",
+	}
+	for name, prefix := range prefixes {
+		for _, tc := range []struct{ message, kind string }{{"You have hit your usage limit", "quota"}, {"Authentication failed", "auth"}} {
+			t.Run(name+"/"+tc.kind, func(t *testing.T) {
+				terminal, _ := json.Marshal(map[string]any{"type": "turn.failed", "error": map[string]string{"message": tc.message}})
+				out, err := parseStream(strings.NewReader(prefix+string(terminal)+"\n"), "graph")
+				if err == nil || out.Status.FailureKind != tc.kind || out.Status.Measurement != "invalid" || !out.Metrics.Partial {
+					t.Fatalf("fatal account failure lost: %#v %v", out, err)
+				}
+				if !strings.Contains(out.Error, tc.message) || (name == "graph" && !strings.Contains(out.Error, "tool unavailable")) || (name == "provider" && !strings.Contains(out.Error, "temporary provider outage")) {
+					t.Fatalf("failure evidence lost: %s", out.Error)
+				}
+			})
+		}
+	}
+}
+
 func TestParseStreamMissingUsageIsUnknown(t *testing.T) {
 	for _, usage := range []string{``, `,"usage":{}`, `,"usage":{"input_tokens":10}`} {
 		t.Run(usage, func(t *testing.T) {

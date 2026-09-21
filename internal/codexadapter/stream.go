@@ -3,6 +3,7 @@ package codexadapter
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -45,13 +46,15 @@ func parseStream(r io.Reader, strategy string) (domain.AgentOutput, error) {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	items := map[string]streamItem{}
-	var firstErr error
+	var streamErr error
 	kind := "protocol"
 	fail := func(k, msg string) {
-		if firstErr == nil {
-			firstErr = fmt.Errorf("%s", msg)
+		// Account failures must stop subsequent runs, even after an earlier
+		// Graph/protocol error. Keep all observed errors for diagnosis.
+		if streamErr == nil || ((k == "auth" || k == "quota") && kind != "auth" && kind != "quota") {
 			kind = k
 		}
+		streamErr = errors.Join(streamErr, fmt.Errorf("%s", msg))
 	}
 	var terminal int
 	var completed bool
@@ -163,7 +166,7 @@ func parseStream(r io.Reader, strategy string) (domain.AgentOutput, error) {
 		out.Metrics.CacheReadInputTokens, out.Metrics.CacheCreationInputTokens = observed.Cached, observed.CacheWrite
 		out.Metrics.ReasoningOutputTokens = observed.Reasoning
 	}
-	out.Metrics.Partial = !completed || terminal != 1 || firstErr != nil || out.Metrics.InputTokens == nil || out.Metrics.OutputTokens == nil
+	out.Metrics.Partial = !completed || terminal != 1 || streamErr != nil || out.Metrics.InputTokens == nil || out.Metrics.OutputTokens == nil
 	if finalText != "" {
 		answer, err := decodeFinal([]byte(finalText))
 		if err != nil {
@@ -174,10 +177,10 @@ func parseStream(r io.Reader, strategy string) (domain.AgentOutput, error) {
 	} else {
 		fail("output_schema", "missing final Codex answer")
 	}
-	if firstErr != nil {
+	if streamErr != nil {
 		out.Status.FailureKind = kind
-		out.Error = firstErr.Error()
-		return out, firstErr
+		out.Error = streamErr.Error()
+		return out, streamErr
 	}
 	out.Status.Measurement = "valid"
 	return out, nil
