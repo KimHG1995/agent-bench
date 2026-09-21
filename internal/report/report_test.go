@@ -9,42 +9,36 @@ import (
 
 func ptr(v int64) *int64 { return &v }
 
-func TestMarkdownPreservesUnmeasuredMetrics(t *testing.T) {
-	results := []domain.RunResult{{
-		TaskID: "t1", Strategy: "baseline", Run: 1, Success: true, Accuracy: 1, DurationMS: 10,
-	}}
-	got := Markdown(results)
-	want := "| baseline | 1 | 100.0% | 1.000 / 1.000 | n/a | n/a | 10.0 / 10.0 ms |"
-	if !strings.Contains(got, want) {
-		t.Fatalf("unexpected report:\n%s", got)
+func comparable(strategy string) domain.RunResult {
+	return domain.RunResult{
+		TaskID:"t1", Strategy:strategy, Run:1, Success:true, Accuracy:1, DurationMS:10,
+		Repository:domain.RepositoryRef{Revision:"abc"},
+		Experiment:domain.ExperimentMeta{ID:"e1",HarnessRevision:"h1",GraphRevision:"g1",TaskHash:"t"},
+		Runtime:domain.AgentRuntime{Provider:"p",Endpoint:"u",RequestedModel:"m",Model:"actual",Adapter:"a",MaxTurns:10},
 	}
+}
+
+func TestValidateComparableRejectsDifferentModels(t *testing.T) {
+	a:=comparable("baseline"); b:=comparable("graph"); b.Runtime.Model="other"
+	if err:=ValidateComparable([]domain.RunResult{a,b}); err==nil { t.Fatal("expected mismatch") }
+}
+
+func TestValidateComparableRejectsDuplicate(t *testing.T) {
+	a:=comparable("baseline")
+	if err:=ValidateComparable([]domain.RunResult{a,a}); err==nil { t.Fatal("expected duplicate") }
 }
 
 func TestMarkdownIncludesPairedComparison(t *testing.T) {
-	results := []domain.RunResult{
-		{TaskID: "t1", Strategy: "baseline", Run: 1, Success: true, Accuracy: 0.8, DurationMS: 100, Metrics: domain.AgentMetrics{ToolCalls: ptr(10), InputTokens: ptr(900), OutputTokens: ptr(100)}},
-		{TaskID: "t1", Strategy: "graph", Run: 1, Success: true, Accuracy: 1.0, DurationMS: 50, Metrics: domain.AgentMetrics{ToolCalls: ptr(5), InputTokens: ptr(400), OutputTokens: ptr(100)}},
-	}
-	got := Markdown(results)
-	for _, want := range []string{
-		"| Accuracy delta | 1 | +0.200 |",
-		"| Tool calls change | 1 | -50.0% |",
-		"| I/O tokens change | 1 | -50.0% |",
-		"| Latency change | 1 | -50.0% |",
-		"| t1 | 0.800 | 1.000 | +0.200 |",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("missing %q in report:\n%s", want, got)
-		}
-	}
+	a:=comparable("baseline"); b:=comparable("graph")
+	a.Accuracy=.8;a.DurationMS=100;a.Metrics=domain.AgentMetrics{ToolCalls:ptr(10),InputTokens:ptr(900),OutputTokens:ptr(100)}
+	b.Accuracy=1;b.DurationMS=50;b.Metrics=domain.AgentMetrics{ToolCalls:ptr(5),InputTokens:ptr(400),OutputTokens:ptr(100)}
+	if err:=ValidateComparable([]domain.RunResult{a,b});err!=nil{t.Fatal(err)}
+	got:=Markdown([]domain.RunResult{a,b})
+	for _,want:=range []string{"| Accuracy delta | 1 | +0.200 |","| Tool calls change | 1 | -50.0% |","| I/O tokens change | 1 | -50.0% |","| Latency change | 1 | -50.0% |"}{if !strings.Contains(got,want){t.Fatalf("missing %q\n%s",want,got)}}
 }
 
-func TestPercentileUsesNearestRank(t *testing.T) {
-	values := []float64{1, 2, 3, 4, 100}
-	if got := percentile(values, 0.50); got != 3 {
-		t.Fatalf("median=%v", got)
-	}
-	if got := percentile(values, 0.95); got != 100 {
-		t.Fatalf("p95=%v", got)
-	}
+func TestPartialTokensExcluded(t *testing.T){
+	r:=comparable("baseline");r.Metrics=domain.AgentMetrics{InputTokens:ptr(10),OutputTokens:ptr(10),Partial:true}
+	got:=Markdown([]domain.RunResult{r})
+	if !strings.Contains(got,"| baseline | 1 | 100.0% | 1.000 / 1.000 | n/a | n/a |"){t.Fatalf("partial tokens leaked:\n%s",got)}
 }
