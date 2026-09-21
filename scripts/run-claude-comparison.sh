@@ -34,6 +34,7 @@ run_strategy() {
     -strategy "$strategy" \
     -command "$ADAPTER_BIN" \
     -repeat 1 \
+    -run-offset "$((run - 1))" \
     -timeout "$TIMEOUT" \
     -out "$out"
 
