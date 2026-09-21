@@ -18,8 +18,15 @@ type Runner struct {
 }
 
 func (r Runner) Run(tasks []domain.Task, strategy, command string, repeat int) []domain.RunResult {
+	return r.RunWithOffset(tasks, strategy, command, repeat, 0)
+}
+
+func (r Runner) RunWithOffset(tasks []domain.Task, strategy, command string, repeat, runOffset int) []domain.RunResult {
 	if repeat < 1 {
 		repeat = 1
+	}
+	if runOffset < 0 {
+		runOffset = 0
 	}
 	if r.Timeout <= 0 {
 		r.Timeout = 120 * time.Second
@@ -27,7 +34,8 @@ func (r Runner) Run(tasks []domain.Task, strategy, command string, repeat int) [
 
 	results := make([]domain.RunResult, 0, len(tasks)*repeat)
 	for _, task := range tasks {
-		for run := 1; run <= repeat; run++ {
+		for i := 1; i <= repeat; i++ {
+			run := runOffset + i
 			results = append(results, r.runOne(task, strategy, command, run))
 		}
 	}
