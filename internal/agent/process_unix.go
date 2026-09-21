@@ -17,3 +17,9 @@ func terminateProcessGroup(cmd *exec.Cmd) {
 	}
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
+
+func interruptProcessGroup(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	}
+}

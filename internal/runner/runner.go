@@ -21,6 +21,7 @@ type Runner struct {
 	ExperimentID    string
 	HarnessRevision string
 	GraphRevision   string
+	StopOnFatal     bool
 }
 
 func (r Runner) Run(tasks []domain.Task, strategy, command string, repeat int) []domain.RunResult {
@@ -60,6 +61,9 @@ func (r Runner) RunWithOffsetEach(
 					return results, err
 				}
 			}
+			if r.StopOnFatal && (result.Status.FailureKind == "auth" || result.Status.FailureKind == "quota") {
+				return results, nil
+			}
 		}
 	}
 	return results, nil
@@ -70,7 +74,7 @@ func (r Runner) runOne(task domain.Task, strategy, command string, run int) doma
 	ctx, cancel := context.WithTimeout(context.Background(), r.Timeout)
 	defer cancel()
 
-	request := domain.RunRequest{Strategy: strategy, Run: run, Task: task.ForAgent()}
+	request := domain.RunRequest{Strategy: strategy, Run: run, Task: task.ForAgent(), TimeoutMS: r.Timeout.Milliseconds()}
 	output, err := r.Agent.Run(ctx, command, request)
 	duration := time.Since(started)
 
@@ -84,8 +88,9 @@ func (r Runner) runOne(task domain.Task, strategy, command string, run int) doma
 			TaskHash:        taskHash(task),
 		},
 		StartedAt: started, DurationMS: duration.Milliseconds(),
-		Success: err == nil && output.Error == "",
-		Answer: output.Answer, Metrics: output.Metrics, Runtime: output.Runtime,
+		Success: err == nil && output.Error == "" && output.Status.Measurement != "invalid",
+		Answer:  output.Answer, Metrics: output.Metrics, Runtime: output.Runtime,
+		Status: output.Status,
 	}
 	if err != nil {
 		result.Error = err.Error()
@@ -96,6 +101,10 @@ func (r Runner) runOne(task domain.Task, strategy, command string, run int) doma
 	}
 	if output.Error != "" {
 		result.Error = output.Error
+		return result
+	}
+	if output.Status.Measurement == "invalid" {
+		result.Error = "invalid measurement: " + output.Status.FailureKind
 		return result
 	}
 

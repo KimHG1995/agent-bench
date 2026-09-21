@@ -27,6 +27,7 @@ func (r CommandRunner) Run(ctx context.Context, command string, req domain.RunRe
 		shell = "/bin/sh"
 	}
 	cmd := exec.Command(shell, "-c", command)
+	cmd.WaitDelay = 2 * time.Second
 	configureProcessGroup(cmd)
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout, stderr bytes.Buffer
@@ -43,11 +44,14 @@ func (r CommandRunner) Run(ctx context.Context, command string, req domain.RunRe
 	select {
 	case runErr = <-done:
 	case <-ctx.Done():
-		terminateProcessGroup(cmd)
+		interruptProcessGroup(cmd)
 		select {
 		case <-done:
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(2 * time.Second):
+			terminateProcessGroup(cmd)
+			<-done
 		}
+		terminateProcessGroup(cmd)
 		runErr = ctx.Err()
 	}
 
